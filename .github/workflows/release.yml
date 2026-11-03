@@ -69,23 +69,32 @@ jobs:
           PY
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: '3.12.16'
+          python-version: '3.12'
+      - name: Install the pinned managed release runtime
+        run: |
+          python -m pip install 'uv==0.13.6'
+          export UV_PYTHON_INSTALL_DIR="$RUNNER_TEMP/release-python"
+          printf 'UV_PYTHON_INSTALL_DIR=%s\n' "$UV_PYTHON_INSTALL_DIR" >> "$GITHUB_ENV"
+          uv python install 3.12.16
       - name: Run the tagged source tests
-        run: python -m unittest discover -s tests -v
+        env:
+          UV_PYTHON_DOWNLOADS: never
+          UV_PYTHON_PREFERENCE: only-managed
+        run: uv run --no-project --python 3.12.16 python -m unittest discover -s tests -v
       - name: Build with the pinned release toolchain
         env:
           UV_PYTHON_DOWNLOADS: never
-          UV_PYTHON_PREFERENCE: only-system
-        run: |
-          python -m pip install 'uv==0.13.6'
-          ./build_binary.sh
+          UV_PYTHON_PREFERENCE: only-managed
+        run: ./build_binary.sh
       - name: Check the standalone CLI and actual terminal lifecycle
         env:
           RELEASE_VERSION: ${{ steps.source.outputs.version }}
+          UV_PYTHON_DOWNLOADS: never
+          UV_PYTHON_PREFERENCE: only-managed
         run: |
           test "$(dist/claudefm --version)" = "claudefm $RELEASE_VERSION"
           dist/claudefm --help
-          python - <<'PY'
+          uv run --no-project --python 3.12.16 python - <<'PY'
           import fcntl, os, pty, re, select, struct, subprocess, termios, time
           master, slave = pty.openpty()
           fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
@@ -153,7 +162,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.source.outputs.version }}
           SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
           UV_PYTHON_DOWNLOADS: never
-          UV_PYTHON_PREFERENCE: only-system
+          UV_PYTHON_PREFERENCE: only-managed
         run: |
           mkdir -p "$RUNNER_TEMP/release-bundle/notices"
           uv tool run --python 3.12 --from 'pyinstaller==6.22.3' python - <<'PY'
@@ -171,7 +180,7 @@ jobs:
           copying = next(p for p in dist.files if p.name == 'COPYING.txt')
           shutil.copyfile(dist.locate_file(copying), notices/'LICENSE-PYINSTALLER.txt')
           PY
-          python - <<'PY'
+          uv run --no-project --python 3.12.16 python - <<'PY'
           import hashlib, json, os, platform, re, shutil, subprocess, tarfile
           from pathlib import Path
           version, tag, commit = (os.environ[n] for n in ('RELEASE_VERSION','RELEASE_TAG','SOURCE_COMMIT'))
