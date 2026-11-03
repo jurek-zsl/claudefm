@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 — 2026-11-03
+
+- Reauthored all nine action timelines with planted walking feet, connected cycling limbs, typing rests, a longer coffee sip, and softer jump recovery.
+- Added subtle floor-contact shadows synchronized with the character's motion.
+- Rebuilt the worlds with atmospheric mountain layers, attached snowcaps, organic trees, warm interior lighting, wood floors, and a grounded rooftop deck.
+- Replaced rigid reflection bars with broken water highlights, confined rain to window glass, and anchored petals and twinkles to their scenery.
+- Added complete action previews in both palettes, timing strips, and stable-palette GIF exports for visual review.
+
 ## 1.0.0 — 2026-11-03
 
 Initial open-source version.

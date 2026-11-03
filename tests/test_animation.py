@@ -4,7 +4,7 @@ import re
 import unittest
 from unittest.mock import patch
 from claudefm.audio import AudioPlayer
-from claudefm.sprites import ACTIVITY_KEYS, HEIGHT, WIDTH, SPRITE_PALETTE, sample_activity
+from claudefm.sprites import ACTIVITY_KEYS, HEIGHT, WIDTH, SPRITE_PALETTE, sample_activity, ACTIVITY_PERIODS, contact_shadows
 from claudefm.tui import TUI, visible_width
 
 
@@ -28,18 +28,112 @@ class AnimationTests(unittest.TestCase):
                 if c==color and y>=17 and (x<14 or x>26))
             self.assertTrue(all(floor(p)==floor(poses[0]) for p in poses))
 
-    def test_walk_keeps_four_separated_legs_throughout_stride(self):
-        for tick in range(120):
+    def test_walk_has_three_weight_bearing_feet_and_distinct_legs(self):
+        lifted = False
+        for tick in range(round(ACTIVITY_PERIODS['walk']*24)):
             pose=sample_activity('walk',tick/24)
-            legs=re.findall('C+',pose[22])
-            self.assertEqual(legs,['CC']*4,tick)
+            contacts=re.findall('C+',pose[-1])
+            self.assertGreaterEqual(len(contacts),3,tick)
+            self.assertTrue(all(len(foot)==2 for foot in contacts),tick)
+            lifted |= len(contacts)==3
+            # The hip row can move with the body, but the four slots stay apart.
+            lower=''.join(pose[23:])
+            self.assertNotIn('CCCC',lower,tick)
+        self.assertTrue(lifted)
 
-    def test_jump_has_anticipation_air_and_return_to_floor(self):
+    def test_jump_gathers_leaves_floor_and_lands_before_recovering(self):
         neutral=sample_activity('bounce',0)
-        apex=sample_activity('bounce',1.1)
-        self.assertIn('C', neutral[-1])
-        self.assertNotIn('C', ''.join(apex[-4:]))
-        self.assertEqual(neutral,sample_activity('bounce',2.4))
+        crouch=sample_activity('bounce',1.65)
+        apex=sample_activity('bounce',2.25)
+        landing=sample_activity('bounce',2.8)
+        first=lambda pose:min(y for y,row in enumerate(pose) if 'C' in row)
+        self.assertGreater(first(crouch),first(neutral))
+        self.assertLess(first(apex),first(neutral))
+        self.assertNotIn('C',''.join(apex[-4:]))
+        self.assertEqual(len(re.findall('C+',landing[-1])),4)
+        self.assertEqual(neutral,sample_activity('bounce',ACTIVITY_PERIODS['bounce']))
+        ground=contact_shadows('bounce',0)[0]
+        airborne=contact_shadows('bounce',2.25)[0]
+        self.assertEqual(ground[1],26)
+        self.assertLess(airborne[2],ground[2])
+        self.assertLess(airborne[3],ground[3])
+
+    @staticmethod
+    def coral_components(pose):
+        remaining={(x,y) for y,row in enumerate(pose) for x,ch in enumerate(row) if ch=='C'}
+        groups=[]
+        while remaining:
+            group={remaining.pop()};todo=list(group)
+            while todo:
+                x,y=todo.pop()
+                for q in ((x-1,y),(x+1,y),(x,y-1),(x,y+1)):
+                    if q in remaining:
+                        remaining.remove(q);group.add(q);todo.append(q)
+            groups.append(group)
+        return sorted(groups,key=len,reverse=True)
+
+    def test_visible_hands_and_legs_remain_connected_during_full_actions(self):
+        for key in ACTIVITY_KEYS:
+            for tick in range(round(ACTIVITY_PERIODS[key]*24)):
+                groups=self.coral_components(sample_activity(key,tick/24))
+                # A desk or guitar may occlude a leg. No isolated hand, elbow,
+                # or unoccluded leg is allowed above those foreground props.
+                if key in ('coding','guitar'):
+                    self.assertTrue(all(all(y>=24 for x,y in g) for g in groups[1:]),(key,tick))
+                else:
+                    self.assertEqual(len(groups),1,(key,tick))
+
+    def test_coding_bursts_have_reading_pauses_and_static_furniture(self):
+        rest=sample_activity('coding',3)
+        self.assertEqual(rest,sample_activity('coding',3.6))
+        self.assertNotEqual(sample_activity('coding',1.25),sample_activity('coding',1.45))
+        for tick in range(round(ACTIVITY_PERIODS['coding']*24)):
+            pose=sample_activity('coding',tick/24)
+            for y,row in enumerate(rest):
+                for x,ch in enumerate(row):
+                    hand_over_keyboard = 23<=x<=25 and 19<=y<=21
+                    if ch in 'TtMNe' and not hand_over_keyboard:
+                        self.assertEqual(pose[y][x],ch,(tick,x,y))
+
+    def test_coffee_has_a_long_sip_and_a_front_grip(self):
+        for t in (0,3.5,4.5,5.5,6.5,7,8):
+            pose=sample_activity('coffee',t)
+            cup=[(x,y) for y,row in enumerate(pose) for x,ch in enumerate(row) if ch=='G']
+            left=min(x for x,y in cup);top=min(y for x,y in cup)
+            self.assertEqual(pose[top+2][left:left+2],'CC')
+            self.assertEqual(pose[top+3][left:left+2],'CC')
+        # Steam drifts independently; cup and hand stay held at sip height.
+        a,b=sample_activity('coffee',4.6),sample_activity('coffee',6.1)
+        self.assertEqual([r[23:34] for r in a[14:23]],[r[23:34] for r in b[14:23]])
+
+    def test_action_loop_seams_return_to_rest_without_a_pose_jump(self):
+        for key,period in ACTIVITY_PERIODS.items():
+            before=sample_activity(key,period-1/24)
+            start=sample_activity(key,0)
+            change=sum(a!=b for ra,rb in zip(before,start) for a,b in zip(ra,rb))
+            # Only wheel spokes or a newly emitted wisp may cross the seam.
+            self.assertLessEqual(change,20,(key,change))
+            self.assertTrue(all(ch==' ' for ch in start[0]),key)
+
+    def test_contact_descriptors_share_the_constant_floor(self):
+        self.assertEqual([s[0] for s in contact_shadows('bike',1)],[9,31])
+        for key,period in ACTIVITY_PERIODS.items():
+            for t in (0,period/3,period*.75):
+                shadows=contact_shadows(key,t)
+                self.assertTrue(shadows)
+                for x,y,radius,alpha in shadows:
+                    self.assertTrue(0<x<WIDTH and y==HEIGHT)
+                    self.assertTrue(0<radius<WIDTH/2)
+                    self.assertTrue(0<alpha<.3)
+
+    def test_hop_shadow_samples_the_same_frame_as_the_actor(self):
+        for frame in (43,44,53,63,64,65):
+            start=frame/24
+            inside=(frame+.9)/24
+            self.assertEqual(sample_activity('bounce',inside),sample_activity('bounce',start))
+            self.assertEqual(contact_shadows('bounce',inside),contact_shadows('bounce',start))
+            # Repeated time additions can land a few ulps below a frame edge.
+            self.assertEqual(contact_shadows('bounce',start-1e-12),contact_shadows('bounce',start))
 
     def test_blink_does_not_repeat_every_action_cycle(self):
         count=lambda t: ''.join(sample_activity('idle',t)).count('E')

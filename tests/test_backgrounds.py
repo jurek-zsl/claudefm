@@ -1,7 +1,8 @@
 """Scene pairing, elapsed-time carousel, compositing and responsive layout."""
 import unittest
 from claudefm.audio import AudioPlayer
-from claudefm.scene import SCENE_NAMES, render_background
+from claudefm.scene import (SCENE_NAMES, Canvas, render_background, _base,
+                            scene_geometry, rain_glass_contains, _ridge_profile)
 from claudefm.sprites import ACTIVITIES, ACTIVITY_KEYS
 from claudefm.tui import TUI, visible_width
 
@@ -88,6 +89,105 @@ class BackgroundTests(unittest.TestCase):
             self.assertGreater(changed,0,key)
             self.assertLess(changed,120,key)
             self.assertEqual(a,render_background(80,40,key,False,0))
+
+    def test_rain_never_overpaints_window_frames_or_mullions(self):
+        for w,h in ((64,28),(100,52),(160,88)):
+            for dark in (False,True):
+                base=_base(w,h,'coding',dark)
+                changes=0
+                for step in range(64):
+                    world=render_background(w,h,'coding',dark,step/8)
+                    for y,(before,after) in enumerate(zip(base,world)):
+                        for x,(a,b) in enumerate(zip(before,after)):
+                            if a!=b:
+                                changes+=1
+                                self.assertTrue(rain_glass_contains(w,h,x,y),(w,h,x,y))
+                self.assertGreater(changes,0)
+
+    def test_snow_begins_on_actual_mountain_ridge(self):
+        w,h=120,64
+        world=_base(w,h,'bike',False)
+        ridge=_ridge_profile(w,h,h*.60,.8,.38)
+        snow=(237,241,229)
+        count=0
+        for x in range(w):
+            ys=[y for y in range(h) if world[y][x]==snow]
+            if ys:
+                count+=len(ys)
+                self.assertEqual(ys[0],ridge[x],x)
+                self.assertEqual(ys,list(range(ys[0],ys[-1]+1)),x)
+                self.assertTrue(all(y>=ridge[x] for y in ys))
+        self.assertGreater(count,50)
+
+    def test_petals_stay_below_their_canopies_without_sky_wrap(self):
+        w,h=100,52
+        _,canopies=scene_geometry(w,h,'wave')
+        base=_base(w,h,'wave',False)
+        changed=0
+        for frame in range(96):
+            world=render_background(w,h,'wave',False,frame/8)
+            for y,(before,after) in enumerate(zip(base,world)):
+                for x,(a,b) in enumerate(zip(before,after)):
+                    if a!=b:
+                        changed+=1
+                        self.assertTrue(any(abs(x-sx)<w*.045+4 and sy-1<=y<=h-2
+                                            for sx,sy in canopies),(x,y))
+        self.assertGreater(changed,0)
+
+    def test_stars_twinkle_in_place_without_appearing_at_unrelated_coordinates(self):
+        w,h=100,52
+        _,moon,positions,_=scene_geometry(w,h,'napping')
+        positions=set(positions)
+        base=_base(w,h,'napping',True)
+        changed=set()
+        for i in range(60):
+            world=render_background(w,h,'napping',True,i/4)
+            for y in range(round(h*.47)):
+                for x in range(w):
+                    if base[y][x]!=world[y][x]:
+                        changed.add((x,y))
+                        self.assertIn((x,y),positions)
+        self.assertEqual(changed,positions)
+        self.assertFalse(any(abs(x-moon[0])<4 and abs(y-moon[1])<4 for x,y in positions))
+
+    def test_water_reflections_are_below_and_aligned_with_their_light(self):
+        w,h=120,64
+        for key in ('bike','napping','guitar'):
+            info=scene_geometry(w,h,key)
+            light_x,waterline=(info[1][0]-1,info[3]) if key=='napping' else (info[1],info[2])
+            for dark in (False,True):
+                world=_base(w,h,key,dark)
+                for y in range(waterline+2,round(h*.84),3):
+                    left,right=round(w*.50),round(w*.94)
+                    brightest=max(range(left,right),key=lambda x:sum(world[y][x]))
+                    self.assertLess(abs(brightest-light_x),w*.16,(key,dark,y,brightest,light_x))
+
+    def test_clipped_drawing_keeps_canvas_rectangular(self):
+        c=Canvas(8,7,(1,2,3))
+        c.rect(-100,0,20,2,(9,9,9));c.rect(-3,-2,7,5,(9,9,9))
+        c.rect(7,5,20,20,(7,7,7));c.rect(1,2,-5,3,(6,6,6))
+        c.line(-1000000,3,1000000,3,(8,8,8))
+        c.line(20,-10,20,100,(8,8,8))
+        c.ellipse(-3,4,7,4,(5,5,5))
+        c.poly([(-30,-20),(100,3),(-30,20)],(4,4,4));c.poly([],(0,0,0))
+        self.assertEqual(len(c.pixels),7)
+        self.assertEqual([len(row) for row in c.pixels],[8]*7)
+        empty=Canvas(0,0);empty.line(-1,-1,2,2,(0,0,0))
+        self.assertEqual(empty.pixels,[])
+
+    def test_animation_never_mutates_a_cached_world_or_another_frame(self):
+        for key in SCENE_NAMES:
+            before=_base(100,52,key,False)
+            snapshot=tuple(tuple(row) for row in before)
+            frame=render_background(100,52,key,False,1)
+            frame[0][0]=(0,0,0)
+            self.assertEqual(_base(100,52,key,False),snapshot)
+            for step in range(24):
+                world=render_background(100,52,key,False,step/8)
+                self.assertEqual((len(world),len(world[0])),(52,100))
+                changed=sum(a!=b for ra,rb in zip(snapshot,world) for a,b in zip(ra,rb))
+                self.assertLess(changed,100*52*.1,key)
+
 
 
 if __name__=='__main__':unittest.main()

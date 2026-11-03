@@ -30,6 +30,11 @@ def _track(t, keys):
     return keys[-1][1]
 
 
+def _sample_time(elapsed):
+    """One clock quantization for the actor and all dependent contact geometry."""
+    return math.floor(max(0,elapsed)*FPS+1e-9)/FPS
+
+
 class _Canvas:
     def __init__(self):
         self.pixels = [[' '] * WIDTH for _ in range(HEIGHT)]
@@ -61,117 +66,222 @@ class _Canvas:
         return [''.join(row) for row in self.pixels]
 
 
-def _body(c, x=11, y=10, height=12, look=0, blink=False,
-          arms=None, legs=None, closed=False):
+# One complete, deliberately paced primary action. Blinks run independently.
+ACTIVITY_PERIODS = {
+    'bike': 2.4, 'walk': 3.2, 'coding': 10.4, 'bounce': 4.8,
+    'wave': 8.0, 'coffee': 12.0, 'napping': 8.0, 'idle': 12.0,
+    'guitar': 8.0,
+}
+
+
+def _arm(c, shoulder, elbow, wrist, hand=(4, 4)):
+    """Two short connected segments; the hand is anchored at the wrist."""
+    c.line(*shoulder, *elbow, thickness=2)
+    joint_y = wrist[1] + (1 if hand[1] >= 3 else 0)
+    c.line(*elbow, wrist[0]+1, joint_y, thickness=2)
+    c.rect(*wrist, *hand)
+
+
+def _torso(c, x=11, y=10, height=12, look=0, look_y=0,
+           blink=False, closed=False):
     x, y = round(x), round(y)
-    # Four distinct legs; offsets move hips/feet without changing the floor.
-    if legs is None:
-        legs = [(0, 4)] * 4
-    for lx, (dx, length) in zip((0, 4, 10, 14), legs):
-        c.rect(x+lx+dx, y+height, 2, length)
     c.rect(x, y, 16, height)
-    if arms is None:
-        arms = ((x-2, y+4), (x+14, y+4))
-    for ax, ay in arms:
-        c.line(x if ax < x else x+15, y+6, ax+1, ay+1, thickness=2)
-        c.rect(ax, ay, 4, 4)
     for ex in (3, 11):
-        c.rect(x+ex+look, y+2 if not closed else y+4,
+        c.rect(x+ex+round(look), y+(4 if closed else 2)+round(look_y),
                2, 1 if blink or closed else 2, 'E')
+
+
+def _legs(c, hip_y=22, feet=None):
+    """Each hip, knee and two-pixel foot stays in its own small leg slot."""
+    if feet is None:
+        feet = [(x,25) for x in (11,15,21,25)]
+    for hip_x, (foot_x, foot_y) in zip((11,15,21,25), feet):
+        knee_y = min(foot_y-1, hip_y+2)
+        # The ankle is drawn before its foot, so no stroke can cross the floor.
+        c.line(hip_x, hip_y, hip_x, knee_y, thickness=2)
+        c.line(hip_x, knee_y, foot_x, foot_y-1, thickness=2)
+        c.rect(foot_x,foot_y,2,1)
+
+
+def _rest_arms(c, y=10):
+    _arm(c,(11,y+6),(10,y+7),(9,y+4))
+    _arm(c,(26,y+6),(26,y+7),(25,y+4))
+
+
+def _hop_state(t):
+    """Shared flight/contact geometry for the actor and its floor shadow."""
+    p=t % ACTIVITY_PERIODS['bounce']
+    if 1.8 <= p < 2.7:
+        u=(p-1.8)/.9
+        lift=20*u*(1-u)  # ballistics: one gravity-driven arc, five pixels high
+        return lift, 10-round(lift), 12, u
+    if 1.5 <= p < 1.8 or 2.7 <= p < 2.9:
+        return 0, 11, 11, None
+    if 2.9 <= p < 3.08:
+        return 0, 9, 13, None  # a short spring recovery with the feet planted
+    return 0, 10, 12, None
+
+
+def contact_shadows(key, elapsed):
+    """Local (center_x, floor_y, radius_x, opacity), shared with the TUI."""
+    if key not in ACTIVITY_PERIODS:
+        raise KeyError(key)
+    if key=='bike':
+        return [(9,26,4,.22),(31,26,4,.22)]
+    if key=='bounce':
+        lift, _, _, _ = _hop_state(_sample_time(elapsed))
+        return [(19,26,8-2*lift/5,.20-.10*lift/5)]
+    radius={'napping':14, 'coding':15, 'guitar':10}.get(key,9)
+    return [(20 if key in ('napping','coding') else 19,26,radius,.16)]
 
 
 def _draw(key, t, blink):
     c = _Canvas()
     tau = 2 * math.pi
     if key == 'bike':
-        phase = tau * t / 1.2
-        for wx in (9, 31):
-            c.wheel(wx, 21, phase)
-        for a, b in (((9,21),(19,21)), ((9,21),(15,14)),
-                     ((15,14),(19,21)), ((15,14),(27,14)),
-                     ((19,21),(27,14)), ((27,14),(31,21)),
-                     ((27,14),(28,10)), ((15,14),(15,12))):
-            c.line(*a, *b, 'B')
-        c.rect(12,12,7,1,'K')
-        c.line(27,10,31,10,'S')
-        bob = round(.55 * math.sin(phase))
-        _body(c, 10, 1+bob, height=10, legs=[(0,0)]*4,
-              arms=((7,7+bob),(27,9)), blink=blink)
-        # Opposite feet share a crank; both remain attached to the rider.
-        for a, hip in ((phase, 15), (phase+math.pi, 23)):
-            px, py = 20+3*math.cos(a), 18+2*math.sin(a)
-            c.line(hip,11+bob,px,py)
+        phase = tau*t/ACTIVITY_PERIODS[key]
+        for wx in (9,31):
+            c.wheel(wx,21,phase)
+        for a,b in (((9,21),(20,19)),((9,21),(15,14)),
+                    ((15,14),(20,19)),((15,14),(27,14)),
+                    ((20,19),(27,14)),((27,14),(31,21)),
+                    ((27,14),(29,10)),((15,14),(15,13))):
+            c.line(*a,*b,'B')
+        c.rect(12,13,7,1,'K')
+        c.line(27,10,32,10,'S')
+        c.rect(27,10,2,1,'K');c.rect(31,10,2,1,'K')
+        bob=round(.65*(1-math.cos(phase*2))/2)
+        # A seated body retains Clawd's native 16 x 12 proportions.
+        _torso(c,10,1+bob,blink=blink)
+        c.rect(19,18,2,2,'B')
+        # Knees lead the pedals. The opposite pair is tucked behind the body.
+        for a,hip_x,knee_side in ((phase+math.pi,14,-1),(phase,23,1)):
+            px,py=20+3*math.cos(a),19+2*math.sin(a)
+            ky=15.5+bob+.5*math.sin(a)
+            kx=hip_x+knee_side*2
+            c.line(hip_x,12+bob,kx,ky,thickness=2)
+            c.line(kx,ky,px,py-1,thickness=2)
             c.rect(px-1,py,3,1)
-        c.rect(19,18,2,1,'K')
+            c.rect(px,py+1,2,1,'K')
+        # Both small hands meet fixed grips; the elbows absorb the body bob.
+        _arm(c,(10,7+bob),(20,11),(26,9),(3,3))
+        _arm(c,(25,7+bob),(28,9),(30,9),(3,3))
     elif key == 'walk':
-        phase = tau * t / 1.25
-        lift = [max(0, math.sin(phase+p)) for p in (0, math.pi, math.pi, 0)]
-        legs = [(round(math.cos(phase)), 4-round(2*l)) for l in lift]
-        _body(c, legs=legs, blink=blink)
+        p=(t % ACTIVITY_PERIODS[key])/ACTIVITY_PERIODS[key]
+        bob=round(.65*math.sin(tau*p*2)**2)
+        feet=[]
+        # Four short swing windows, with three feet bearing weight at all times.
+        for i,hip_x in enumerate((11,15,21,25)):
+            u=(p-(.06+i*.24))/.18
+            lift=round(2*math.sin(math.pi*u)) if 0<u<1 else 0
+            bend=(-1 if i in (0,2) else 1) if lift else 0
+            feet.append((hip_x+bend,25-lift))
+        _legs(c,22-bob,feet)
+        _torso(c,y=10-bob,blink=blink)
+        # A tiny opposing arm follow-through accompanies the weight transfer.
+        sway=round(.55*math.sin(tau*p))
+        _arm(c,(11,16-bob),(10,17-bob),(9,14-bob+sway))
+        _arm(c,(26,16-bob),(27,17-bob),(25,14-bob-sway))
     elif key == 'coding':
-        tap = round(max(0, math.sin(tau*t/0.8)))
-        _body(c, 7, 10, blink=blink, look=1,
-              arms=((4,17),(24,18-tap)))
+        p=t % ACTIVITY_PERIODS[key]
+        typing=1.2<=p<2.4 or 4.4<=p<5.8
+        beat=(p-1.2)%.4 if p<2.4 else (p-4.4)%.35
+        tap=1 if typing and beat<.13 else 0
+        look=0 if 8.7<p<9.5 else 1
+        # The desk, feet and screen remain completely still during the bursts.
+        for x in (7,11,17,21):c.rect(x,22,2,4)
+        _torso(c,7,10,look=look,blink=blink)
         c.rect(4,22,31,2,'T')
-        c.rect(6,24,2,2,'t'); c.rect(31,24,2,2,'t')
-        c.rect(26,13,10,8,'M'); c.rect(27,14,8,5,'N')
-        c.rect(28,15,4,1,'e'); c.rect(28,17,6,1,'e')
+        c.rect(6,24,2,2,'t');c.rect(31,24,2,2,'t')
+        c.rect(26,13,10,8,'M');c.rect(27,14,8,5,'N')
+        c.rect(28,15,4,1,'e');c.rect(28,17,6,1,'e')
         c.rect(22,21,14,1,'M')
-        c.rect(22,20-tap,3,2)  # typing hand reaches the keyboard
+        _arm(c,(7,16),(5,18),(4,19),(3,3))
+        _arm(c,(22,16),(24,18),(23,19+tap),(3,2))
     elif key == 'bounce':
-        p = t % 2.4
-        # Settle, gather, launch, hang, fall, squash, recover.
-        rise = _track(p, [(0,0),(.45,0),(.65,-1),(.88,4),
-                          (1.12,5),(1.35,4),(1.58,0),(1.75,-1),(2.0,0),(2.4,0)])
-        squash = 1 if rise < -.4 else 0
-        y = 10-round(max(0,rise))+squash
-        h = 12-squash
-        arms = ((8,y+3),(25,y+3)) if rise > 1 else None
-        _body(c,y=y,height=h,arms=arms,blink=blink)
+        lift,y,h,flight=_hop_state(t)
+        if flight is None:
+            _legs(c,y+h)
+        else:
+            # Feet tuck just a little near the apex, then extend for landing.
+            tuck=round(math.sin(math.pi*flight))
+            feet=[(x,25-round(lift)-tuck) for x in (11,15,21,25)]
+            _legs(c,y+h,feet)
+        _torso(c,y=y,height=h,blink=blink)
+        lag=round(math.sin(math.pi*flight)) if flight is not None else 0
+        _arm(c,(11,y+6),(9,y+7),(9,y+4-lag))
+        _arm(c,(26,y+6),(28,y+7),(25,y+4-lag))
     elif key == 'wave':
-        p = t % 5.6
-        reach = _track(p,[(0,0),(.6,0),(1,1),(2.9,1),(3.3,0),(5.6,0)])
-        # Hold a greeting and do two wrist waves, then rest.
-        wag = round(math.sin((p-1)*tau/0.65)) if 1 < p < 2.9 else 0
-        hand = (25+wag,14-round(10*reach))
-        _body(c,arms=((9,14),hand),blink=blink,look=0)
+        p=t % ACTIVITY_PERIODS[key]
+        reach=_track(p,[(0,0),(1.5,0),(2.3,1),(4.5,1),(5.4,0),(8,0)])
+        wag=round(math.sin((p-2.3)*tau/1.1)) if 2.3<p<4.5 else 0
+        _legs(c);_torso(c,blink=blink)
+        _arm(c,(11,16),(10,17),(9,14))
+        _arm(c,(26,16),(27+round(2*reach),16-round(reach)),
+             (25+round(4*reach)+wag,14-round(7*reach)))
     elif key == 'coffee':
-        p = t % 7.2
-        sip = _track(p,[(0,0),(2.0,0),(2.7,1),(3.5,1),(4.2,0),(7.2,0)])
-        mx, my = 27-round(3*sip), 17-round(3*sip)
-        _body(c,arms=((8,17),(mx-1,my+1)),blink=blink,closed=sip>.8)
-        c.rect(mx,my,5,5,'G'); c.rect(mx+1,my,3,1,'g')
-        c.rect(mx+5,my+1,2,3,'G'); c.rect(mx+5,my+2,1,1,' ')
-        # Steam stays tied to the cup, with staggered rising wisps.
+        p=t % ACTIVITY_PERIODS[key]
+        sip=_track(p,[(0,0),(3,0),(4.25,1),(6.5,1),(7.75,0),(12,0)])
+        mx,my=27-round(3*sip),17-round(3*sip)
+        _legs(c);_torso(c,blink=blink,closed=sip>.85)
+        _arm(c,(11,16),(10,17),(9,14))
+        # The forearm stays behind the cup, and a visible front grip is last.
+        c.line(26,16,mx-1,my+3,thickness=2)
+        c.rect(mx,my,5,5,'G');c.rect(mx+1,my,3,1,'g')
+        c.rect(mx+5,my+1,2,3,'G');c.rect(mx+5,my+2,1,1,' ')
+        c.rect(mx-1,my+2,3,2)
         for i in range(2):
-            age = (t*.7+i*.5)%1
-            c.rect(mx+1+i*2+round(math.sin(age*tau)),my-2-round(age*4),1,1,'S')
+            age=(t/4+i*.5)%1
+            sy=my-2-round(age*6)
+            sx=mx+1+i*2+round(math.sin(age*tau))
+            c.rect(sx,sy,1,1,'S')
+            if .2<age<.7:c.rect(sx+1,sy-1,1,1,'S')
     elif key == 'napping':
-        c.rect(6,24,28,2,'Z'); c.rect(8,23,24,1,'Z')
-        breath = round((1-math.cos(tau*t/5.6))*.5)
-        _body(c,11,14-breath,height=9+breath,legs=[(0,0)]*4,closed=True,
-              arms=((8,19),(27,19)))
+        c.rect(6,24,28,2,'Z');c.rect(8,23,24,1,'Z')
+        p=(t % ACTIVITY_PERIODS[key])/ACTIVITY_PERIODS[key]
+        breath=round((1-math.cos(tau*p))*.5)
+        # Lower edge and cushion stay planted while the upper body rises.
+        y=14-breath
+        _torso(c,11,y,height=9+breath,closed=True,look_y=1 if .73<p<.94 else 0)
+        _arm(c,(11,20),(10,21),(8,19))
+        _arm(c,(26,20),(28,21),(27,19))
     elif key == 'guitar':
-        strum = round(math.sin(tau*t/.85))
-        _body(c,blink=blink,arms=((8,17),(28,13)))
-        c.rect(18,17,8,7,'A'); c.rect(16,19,12,3,'A')
-        c.line(23,19,32,12,'a'); c.rect(31,11,3,3,'A')
-        c.rect(20,19,3,3,'a'); c.rect(19,18+strum,3,2)
-    else:  # quiet idle/look-around
-        p = t % 8
-        look = -1 if 2 < p < 3.6 else 1 if 5 < p < 6.6 else 0
-        _body(c,look=look,blink=blink)
+        p=t % ACTIVITY_PERIODS[key]
+        stroke=_track(p%1.6,[(0,0),(.12,0),(.29,1),(.48,1),(1.05,0),(1.6,0)])
+        fret=_track(p,[(0,0),(2.4,0),(2.9,1),(5.4,1),(6,0),(8,0)])
+        _legs(c);_torso(c,blink=blink)
+        # A fixed neck and two blocky bouts; hand motion does not move the prop.
+        c.rect(18,17,8,7,'A');c.rect(16,20,12,4,'A')
+        c.rect(17,19,10,3,'A');c.rect(20,19,3,3,'a')
+        c.line(24,18,32,11,'a',thickness=2);c.rect(31,10,3,3,'A')
+        c.line(23,20,32,12,'G')
+        _arm(c,(26,16),(30,16),(28+round(fret),12-round(fret)),(3,3))
+        _arm(c,(11,16),(16,17),(20,18+round(3*stroke)),(3,2))
+    else:
+        p=t % ACTIVITY_PERIODS['idle']
+        expand=1 if (1-math.cos(tau*p/6))*.5>.75 else 0
+        look=_track(p,[(0,0),(2.4,0),(2.8,-1),(4.1,-1),(4.5,0),
+                       (6.5,0),(6.9,1),(8.2,1),(8.6,0),(12,0)])
+        down=_track(p,[(0,0),(9.2,0),(9.5,1),(10.1,1),(10.4,0),(12,0)])
+        _legs(c)
+        _torso(c,y=10-expand,height=12+expand,look=look,look_y=down,blink=blink)
+        _rest_arms(c,10-expand)
     return c.rows()
+
+
+def _blink(t):
+    # Uneven spacing plus one occasional double blink, never one blink per action.
+    p=t % 31.2
+    return any(start<=p<start+duration for start,duration in (
+        (5.10,.13),(12.60,.13),(20.05,.11),(20.36,.11),(28.75,.14)))
 
 
 def sample_activity(key, elapsed):
     """Sample by animation time, independent of redraw rate or wall clock."""
     if key not in ACTIVITIES:
         raise KeyError(key)
-    t = math.floor(max(0, elapsed) * FPS + 1e-9) / FPS
-    # A short blink every several seconds, independent of the action cycle.
-    blink = 5.1 <= t % 6.8 < 5.23
-    return _draw(key, t, blink)
+    t=_sample_time(elapsed)
+    return _draw(key,t,_blink(t))
 
 
 # Preserve existing numeric shortcuts. Idle and guitar extend the carousel.
@@ -180,10 +290,12 @@ _NAMES = ['Cruising on Bike', 'Scuttle Walk', 'Deep Focus Coding', 'Bounce & Gro
           'Waving Hello', 'Coffee Break', 'Power Nap', 'A Little Look Around', 'Guitar Time']
 _ICONS = ['🚲', '🦀', '💻', '🎧', '👋', '☕', '😴', '·', '♪']
 ACTIVITIES = {key: {
-    'name': name, 'icon': icon, 'has_scrolling_road': key in ('bike','walk'),
+    'name': name, 'icon': icon, 'duration': ACTIVITY_PERIODS[key],
+    'has_scrolling_road': key in ('bike','walk'),
     'has_desk': key == 'coding', 'background': key,
     'particle_origin': {'napping': (29,13), 'bounce': (29,9), 'guitar': (30,12)}.get(key),
 } for key,name,icon in zip(ACTIVITY_KEYS,_NAMES,_ICONS)}
 # Small backwards-compatible pose collection for artwork/inspection tools.
 for _key, _info in ACTIVITIES.items():
-    _info['frames'] = [_draw(_key, i/12, False) for i in range(96)]
+    _info['frames'] = [_draw(_key, i/12, False)
+                       for i in range(round(ACTIVITY_PERIODS[_key]*12))]

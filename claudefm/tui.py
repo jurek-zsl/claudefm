@@ -19,6 +19,7 @@ from claudefm.sprites import (
     ACTIVITIES,
     ACTIVITY_KEYS,
     sample_activity,
+    contact_shadows,
     WIDTH, HEIGHT, FPS,
 )
 from claudefm.scene import SCENE_NAMES, Scene, render_background
@@ -93,6 +94,33 @@ def compress_row(cells, background):
             last_sgr = sgr
     out.append('\033[0m')
     return ''.join(out)
+
+
+def _composite_contact_shadows(pixels, origin_x, origin_y, patches):
+    """Soften contact with the floor without tinting the actor or scenery above it.
+
+    Patches are local (center_x, floor_y, radius, opacity) tuples. The sprite
+    pass runs afterward, keeping feet and props crisp over the soft shadow.
+    """
+    if not pixels or not pixels[0]:
+        return
+    height, width = len(pixels), len(pixels[0])
+    for center, floor, radius, opacity in patches:
+        if radius <= 0 or opacity <= 0:
+            continue
+        center += origin_x
+        floor += origin_y
+        for y in range(max(0, math.floor(floor)), min(height, math.ceil(floor + 2))):
+            vertical = max(0.0, 1 - ((y - floor + .3) / 2) ** 2)
+            for x in range(max(0, math.floor(center - radius)),
+                           min(width, math.ceil(center + radius))):
+                distance = (x + .5 - center) / radius
+                softness = max(0.0, 1 - distance * distance) ** 2
+                shade = min(.35, opacity) * softness * vertical
+                if shade > 0:
+                    pixels[y][x] = tuple(round(channel * (1 - shade))
+                                         for channel in pixels[y][x])
+
 
 class TUI:
     def __init__(self, audio_player, initial_theme='auto', initial_activity='bike'):
@@ -279,6 +307,8 @@ class TUI:
         pose = sample_activity(self.activity_key, self.animation_time)
         mx, my = self.mascot_origin(cols, rows)
         py = (my - 1) * 2
+        _composite_contact_shadows(pixels, mx, py,
+                                   contact_shadows(self.activity_key, self.animation_time))
         for y, sprite_row in enumerate(pose):
             for x, char in enumerate(sprite_row):
                 color = SPRITE_PALETTE[char]
