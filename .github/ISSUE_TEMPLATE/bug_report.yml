@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a playback, animation, installation, or terminal problem.
+title: '[Bug]: '
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run claudefm ...
+        2. Press ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Claude FM version
+      description: Output of claudefm --version and how you installed it.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and terminal
+      placeholder: macOS 15, iTerm2; or Ubuntu 24.04, GNOME Terminal
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics or screenshot
+      description: For audio problems, include the output of claudefm --check-audio and the versions of mpv and yt-dlp.

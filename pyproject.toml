@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=61", "wheel>=0.37"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claudefm"
+dynamic = ["version"]
+description = "An unofficial Claude FM terminal radio with animated Clawd scenes"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+maintainers = [{name = "jurek-zsl"}]
+keywords = ["claude", "clawd", "terminal", "radio", "lofi", "music"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/jurek-zsl/claudefm"
+Repository = "https://github.com/jurek-zsl/claudefm"
+Issues = "https://github.com/jurek-zsl/claudefm/issues"
+Changelog = "https://github.com/jurek-zsl/claudefm/blob/main/CHANGELOG.md"
+
+[project.scripts]
+claudefm = "claudefm.cli:main"
+
+[tool.setuptools]
+packages = ["claudefm"]
+include-package-data = false
+license-files = ["LICENSE", "NOTICE"]
+
+[tool.setuptools.dynamic]
+version = {attr = "claudefm.__version__"}

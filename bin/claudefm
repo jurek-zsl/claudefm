@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+import sys
+import os
+
+# Add real parent directory of bin to sys.path so claudefm package is always found even via symlinks
+real_path = os.path.realpath(__file__)
+pkg_dir = os.path.dirname(os.path.dirname(real_path))
+if pkg_dir not in sys.path:
+    sys.path.insert(0, pkg_dir)
+
+from claudefm.cli import main
+
+if __name__ == "__main__":
+    main()

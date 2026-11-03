@@ -1,0 +1,12 @@
+include README.md LICENSE NOTICE pyproject.toml setup.py
+include build_binary.sh bin/claudefm
+recursive-include claudefm *.py
+prune tests
+prune docs
+prune art
+prune scripts
+prune .local
+prune .github
+prune build
+prune dist
+global-exclude __pycache__ *.py[cod] .DS_Store

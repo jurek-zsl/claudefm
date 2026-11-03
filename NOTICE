@@ -1,0 +1,28 @@
+claudefm — community terminal radio player
+
+The MIT license in LICENSE applies to this project's original source code,
+original scene artwork, documentation, and terminal rendering and animation
+implementation. It does not grant rights to third-party trademarks, character
+designs, music, recordings, or other third-party material.
+
+Claude, Claude FM, Clawd, and associated branding and character design belong
+to Anthropic. This is an independent community project, not an official
+Anthropic product, and it is not affiliated with or endorsed by Anthropic.
+The terminal character artwork is an original adaptation of the Clawd design;
+it is not a distribution of official animation assets.
+
+Visual references:
+- Anthropic's Claude FM stream:
+  https://www.youtube.com/watch?v=tRsQsTMvPNg
+- Ayotomiwa Wale-Durojaye's Clawd motion study, published by Codrops:
+  https://tympanus.net/codrops/2026/05/05/reverse-engineering-claude-ais-mascot-animations-with-svg-and-gsap/
+
+These sources informed the visual reference and motion study. No source code
+from that motion study is incorporated into this project.
+
+Music is played from the user's selected external stream through mpv. Music
+and recordings are not included in or redistributed with this repository.
+Rights in the music and recordings remain with their respective owners.
+
+mpv and yt-dlp are separately installed external programs, not bundled project
+code. Their own licenses and terms apply to those programs.
