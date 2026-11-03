@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 — 2026-11-03
+
+- Walking and cycling now travel between visible foreground destinations, rest, turn, and return.
+- Matched walking stance to world movement and wheel/pedal rotation to traveled distance.
+- Kept position, direction, shadows, and gait together during pauses, scene changes, and resizing.
+- Opened the forest's foreground trail and kept the ground stationary under moving feet and wheels.
+
 ## 1.1.0 — 2026-11-03
 
 - Reauthored all nine action timelines with planted walking feet, connected cycling limbs, typing rests, a longer coffee sip, and softer jump recovery.

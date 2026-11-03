@@ -7,11 +7,11 @@
 [![macOS · Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](#requirements)
 [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-![Clawd coding beside a rainy window in the actual terminal renderer](docs/assets/demo.gif)
+![Clawd strolling across the forest trail in the actual terminal renderer](docs/assets/demo.gif)
 
 A community-built player for [Claude FM](https://www.youtube.com/watch?v=tRsQsTMvPNg). Listen while Clawd cycles through bike rides, coffee breaks, sunset guitar sessions, and other small moments. The Python app uses only the standard library; `mpv` and `yt-dlp` handle audio.
 
-- **Deliberate movement:** a 24 fps pixel rig, weight-bearing steps, coordinated pedaling, sipping pauses, and occasional blinks.
+- **Deliberate movement:** a 24 fps pixel rig, forest strolls and bike rides between visible destinations, sipping pauses, and occasional blinks.
 - **Nine matching worlds:** atmospheric landscapes, warm room lighting, natural foliage, and water reflecting the sun and moon.
 - **A comfortable pace:** soft contact shadows, settled props, gentle rain, drifting petals, and quiet fireflies in both palettes.
 - **A calm rotation:** activity and background change together every five minutes.

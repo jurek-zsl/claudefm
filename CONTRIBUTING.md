@@ -48,10 +48,10 @@ The app has no Python runtime dependencies. Pillow is an optional development to
 python -m pip install Pillow
 python scripts/preview_animations.py --scenes-only --scene-motion
 # Review every full action in both palettes, with pose timing strips:
-python scripts/preview_animations.py --scenes-only --motion-all --motion-strips --fps 24
+python scripts/preview_animations.py --scenes-only --motion-all --motion-strips --journey-strips --fps 12
 ```
 
-Previews are written under `art/out/clawd/` by default and are ignored by Git. Use `--out /path/to/output` to save separate before/after captures. The script renders the app's actual terminal output; it does not use a separate mockup. Motion exports cover complete action cycles and use a consistent GIF palette to avoid artificial color flicker. Curated README media lives in `docs/assets/`.
+Previews are written under `art/out/clawd/` by default and are ignored by Git. Use `--out /path/to/output` to save separate before/after captures. The script renders the app's actual terminal output; it does not use a separate mockup. Motion exports cover complete action cycles, including outbound/rest/turn/return journeys for walking and cycling, and use a consistent GIF palette to avoid artificial color flicker. Journey strips show world positions throughout each trip. Curated README media lives in `docs/assets/`.
 
 When changing animation or rendering:
 

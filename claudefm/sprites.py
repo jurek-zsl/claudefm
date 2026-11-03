@@ -96,10 +96,10 @@ def _legs(c, hip_y=22, feet=None):
     if feet is None:
         feet = [(x,25) for x in (11,15,21,25)]
     for hip_x, (foot_x, foot_y) in zip((11,15,21,25), feet):
-        knee_y = min(foot_y-1, hip_y+2)
+        knee_y = min(foot_y-2, hip_y+1)
         # The ankle is drawn before its foot, so no stroke can cross the floor.
         c.line(hip_x, hip_y, hip_x, knee_y, thickness=2)
-        c.line(hip_x, knee_y, foot_x, foot_y-1, thickness=2)
+        c.line(hip_x, knee_y, foot_x, foot_y-2, thickness=2)
         c.rect(foot_x,foot_y,2,1)
 
 
@@ -135,13 +135,14 @@ def contact_shadows(key, elapsed):
     return [(20 if key in ('napping','coding') else 19,26,radius,.16)]
 
 
-def _draw(key, t, blink):
+def _draw(key, t, blink, travel=None):
     c = _Canvas()
     tau = 2 * math.pi
     if key == 'bike':
-        phase = tau*t/ACTIVITY_PERIODS[key]
+        phase = tau*travel.phase if travel is not None else tau*t/ACTIVITY_PERIODS[key]
+        wheel_angle = travel.distance/4 if travel is not None else phase
         for wx in (9,31):
-            c.wheel(wx,21,phase)
+            c.wheel(wx,21,wheel_angle)
         for a,b in (((9,21),(20,19)),((9,21),(15,14)),
                     ((15,14),(20,19)),((15,14),(27,14)),
                     ((20,19),(27,14)),((27,14),(31,21)),
@@ -151,8 +152,9 @@ def _draw(key, t, blink):
         c.line(27,10,32,10,'S')
         c.rect(27,10,2,1,'K');c.rect(31,10,2,1,'K')
         bob=round(.65*(1-math.cos(phase*2))/2)
+        if travel is not None and not travel.moving:bob=0
         # A seated body retains Clawd's native 16 x 12 proportions.
-        _torso(c,10,1+bob,blink=blink)
+        _torso(c,10,1+bob,blink=blink,look=travel.look if travel is not None else 0)
         c.rect(19,18,2,2,'B')
         # Knees lead the pedals. The opposite pair is tucked behind the body.
         for a,hip_x,knee_side in ((phase+math.pi,14,-1),(phase,23,1)):
@@ -167,19 +169,24 @@ def _draw(key, t, blink):
         _arm(c,(10,7+bob),(20,11),(26,9),(3,3))
         _arm(c,(25,7+bob),(28,9),(30,9),(3,3))
     elif key == 'walk':
-        p=(t % ACTIVITY_PERIODS[key])/ACTIVITY_PERIODS[key]
-        bob=round(.65*math.sin(tau*p*2)**2)
-        feet=[]
-        # Four short swing windows, with three feet bearing weight at all times.
-        for i,hip_x in enumerate((11,15,21,25)):
-            u=(p-(.06+i*.24))/.18
-            lift=round(2*math.sin(math.pi*u)) if 0<u<1 else 0
-            bend=(-1 if i in (0,2) else 1) if lift else 0
-            feet.append((hip_x+bend,25-lift))
+        if travel is not None:
+            from claudefm.locomotion import walking_feet
+            p=travel.phase
+            feet=[(foot.local_x,foot.y) for foot in walking_feet(travel)]
+            bob=round(.65*math.sin(tau*p*2)**2) if travel.moving else 0
+        else:
+            p=(t % ACTIVITY_PERIODS[key])/ACTIVITY_PERIODS[key]
+            bob=round(.65*math.sin(tau*p*2)**2)
+            feet=[]
+            # The static pose API remains useful to sprite-sheet consumers.
+            for i,hip_x in enumerate((11,15,21,25)):
+                u=(p-(.06+i*.24))/.18
+                lift=round(2*math.sin(math.pi*u)) if 0<u<1 else 0
+                bend=(-1 if i in (0,2) else 1) if lift else 0
+                feet.append((hip_x+bend,25-lift))
         _legs(c,22-bob,feet)
-        _torso(c,y=10-bob,blink=blink)
-        # A tiny opposing arm follow-through accompanies the weight transfer.
-        sway=round(.55*math.sin(tau*p))
+        _torso(c,y=10-bob,blink=blink,look=travel.look if travel is not None else 0)
+        sway=round(.55*math.sin(tau*p)) if travel is None or travel.moving else 0
         _arm(c,(11,16-bob),(10,17-bob),(9,14-bob+sway))
         _arm(c,(26,16-bob),(27,17-bob),(25,14-bob-sway))
     elif key == 'coding':
@@ -282,6 +289,36 @@ def sample_activity(key, elapsed):
         raise KeyError(key)
     t=_sample_time(elapsed)
     return _draw(key,t,_blink(t))
+
+
+def sample_travel_pose(key, motion):
+    """Draw a world-aware pose using one already-sampled locomotion state."""
+    if key not in ('walk','bike'):
+        return sample_activity(key,motion.elapsed)
+    pose=_draw(key,motion.elapsed,_blink(motion.elapsed),travel=motion)
+    if motion.facing==1:
+        return pose
+    pivot=37 if key=='walk' else 40
+    mirrored=[]
+    for row in pose:
+        out=[' ']*WIDTH
+        for x,char in enumerate(row):
+            nx=pivot-x
+            if 0<=nx<WIDTH:out[nx]=char
+        mirrored.append(''.join(out))
+    return mirrored
+
+
+def travel_contact_shadows(key, motion):
+    """Mirror physical cell centers about the same actor pivot as its pixels."""
+    patches=contact_shadows(key,motion.elapsed)
+    if key=='bike':
+        # Wheel center indices9/31 correspond to physical cell centers9.5/31.5.
+        patches=[(x+.5,y,r,a) for x,y,r,a in patches]
+    if motion.facing==-1:
+        pivot=38 if key=='walk' else 41
+        patches=[(pivot-x,y,r,a) for x,y,r,a in patches]
+    return patches
 
 
 # Preserve existing numeric shortcuts. Idle and guitar extend the carousel.

@@ -188,6 +188,15 @@ class BackgroundTests(unittest.TestCase):
                 changed=sum(a!=b for ra,rb in zip(snapshot,world) for a,b in zip(ra,rb))
                 self.assertLess(changed,100*52*.1,key)
 
+    def test_travel_scenes_have_stationary_foreground_for_foot_and_wheel_contact(self):
+        for width, height in ((64, 28), (80, 40), (160, 88)):
+            for key in ('walk', 'bike'):
+                for dark in (False, True):
+                    ground = render_background(width, height, key, dark, 0)[-3:]
+                    for elapsed in (1.5, 8, 17, 31):
+                        self.assertEqual(render_background(width, height, key, dark, elapsed)[-3:],
+                                         ground, (width, key, dark, elapsed))
+
 
 
 if __name__=='__main__':unittest.main()

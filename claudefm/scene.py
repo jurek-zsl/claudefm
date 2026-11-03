@@ -261,13 +261,16 @@ def _base(w, h, key, dark):
                   ((67, 86, 63), (66, 105, 73), (79, 119, 79), (99, 132, 88)) if dark else
                   ((139, 151, 107), (136, 171, 117), (151, 185, 128), (167, 195, 140)), i)
         c.rect(0, h*.79, w, h*.21, (58, 85, 60) if dark else (138, 166, 105))
-        c.poly([(w*.71, h*.69), (w*.74, h*.69), (w*.65, h*.86), (w*.69, h),
-                (w*.23, h), (w*.53, h*.85)], (130, 124, 88) if dark else (210, 195, 144))
+        # The near trail opens into a broad, unobstructed walking apron.
+        # Its fixed margins match the actor's reachable foreground corridor.
+        c.poly([(w*.71, h*.69), (w*.74, h*.69), (w*.65, h*.86),
+                (w-8, floor-3), (w-8, h), (8, h), (8, floor-3),
+                (w*.53, h*.85)], (130, 124, 88) if dark else (210, 195, 144))
         for x, seed in ((w*.025, 5), (w*.98, 9)):
             _tree(c, x, floor, h*.73, w*.13,
                   ((58, 70, 51), (37, 73, 51), (48, 89, 59), (76, 111, 69)) if dark else
                   ((99, 111, 69), (72, 123, 75), (91, 145, 85), (127, 169, 102)), seed)
-        for x in (w*.02, w*.13, w*.86, w*.97):
+        for x in (2, 6, w-7, w-3):
             _fern(c, x, floor, 4, (105, 139, 81) if dark else (145, 176, 103), (73, 106, 68))
         _glow(c, w*.45, floor, w*.2, h*.16, (230, 212, 142), .14)
     elif key == 'coding':
@@ -472,13 +475,14 @@ def render_background(w, h, key, dark=False, elapsed=0):
             if y < h*.88:
                 _tint_pixel(c, sun_x+math.sin(i*2)*i*.3, y,
                             (246, 218, 169), .10+.13*math.sin(t*.7+i)**2)
-    elif key in ('bike', 'walk'):
-        # Only a few foreground stones/leaves pass; the landscape stays still.
-        for i in range(4):
-            phase = (t/(10+i)+i*.23)%1
-            x = w*(1-phase)
-            amount = math.sin(math.pi*phase)**2*.24
-            _tint_pixel(c, x, floor+(i%2), (179, 181, 142) if dark else (142, 151, 111), amount)
+    elif key == 'bike':
+        # Clawd travels over fixed ground; only the distant lake light moves.
+        _, sun_x, waterline = scene_geometry(w, h, key)
+        for i in range(5):
+            y = waterline+2+i*2
+            if y < h*.84:
+                _tint_pixel(c, sun_x+math.sin(i*2)*i*.25, y,
+                            (214, 224, 200), .08+.10*math.sin(t*.6+i)**2)
     elif key == 'bounce':
         for i in range(3):
             x, y = round(w*(.68+i*.09)), round(h*(.62+(i%2)*.08))

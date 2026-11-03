@@ -18,11 +18,12 @@ from claudefm.sprites import (
     SPRITE_PALETTE,
     ACTIVITIES,
     ACTIVITY_KEYS,
-    sample_activity,
-    contact_shadows,
+    sample_travel_pose,
+    travel_contact_shadows,
     WIDTH, HEIGHT, FPS,
 )
 from claudefm.scene import SCENE_NAMES, Scene, render_background
+from claudefm.locomotion import sample_locomotion, remap_journey_elapsed
 from claudefm.themes import LIGHT_THEME, DARK_THEME, detect_system_theme
 
 _ANSI_RE = re.compile(r'\033\[[0-9;]*m')
@@ -144,6 +145,9 @@ class TUI:
         self.activity_elapsed = 0.0
         self._previous_lines = []
         self._previous_size = None
+        self._motion_cache = None
+        self._journey_cols = None
+        self._journey_offset = 0.0
 
         # Terminal settings
         self.old_termios = None
@@ -252,9 +256,26 @@ class TUI:
             self.animation_time = self.activity_elapsed = 0.0
             self.last_activity_switch = time.monotonic()
             self.scene.reset(key)
+            self._motion_cache = None
+            self._journey_cols = None
+            self._journey_offset = 0.0
+
+    def _frame_motion(self, cols):
+        if self._journey_cols is not None and cols!=self._journey_cols:
+            elapsed=self.animation_time+self._journey_offset
+            remapped=remap_journey_elapsed(self.activity_key,elapsed,self._journey_cols,cols)
+            self._journey_offset=remapped-self.animation_time
+        self._journey_cols=cols
+        key=(self.activity_key,self.animation_time+self._journey_offset,cols)
+        if self._motion_cache is None or self._motion_cache[0]!=key:
+            motion=sample_locomotion(*key)
+            # Eye blinks and stationary activities retain the global actor clock.
+            actor_time=math.floor(self.animation_time*FPS+1e-9)/FPS
+            self._motion_cache=(key,motion._replace(elapsed=actor_time))
+        return self._motion_cache[1]
 
     def mascot_origin(self, cols, rows):
-        return max(1, min(cols - WIDTH - 1, cols // 3 - 8)), rows - 4 - HEIGHT // 2
+        return self._frame_motion(cols).origin_x, rows - 4 - HEIGHT // 2
 
     def advance(self, dt):
         """The five-minute carousel uses real elapsed time, even while paused."""
@@ -304,11 +325,12 @@ class TUI:
         pixels = render_background(cols, ground_row * 2, self.activity_key,
                                    th.is_dark, self.scene.elapsed)
         # Compose the real background under every transparent half-pixel.
-        pose = sample_activity(self.activity_key, self.animation_time)
-        mx, my = self.mascot_origin(cols, rows)
+        motion = self._frame_motion(cols)
+        pose = sample_travel_pose(self.activity_key, motion)
+        mx, my = motion.origin_x, rows - 4 - HEIGHT // 2
         py = (my - 1) * 2
         _composite_contact_shadows(pixels, mx, py,
-                                   contact_shadows(self.activity_key, self.animation_time))
+                                   travel_contact_shadows(self.activity_key, motion))
         for y, sprite_row in enumerate(pose):
             for x, char in enumerate(sprite_row):
                 color = SPRITE_PALETTE[char]

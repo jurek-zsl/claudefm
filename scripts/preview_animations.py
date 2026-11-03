@@ -21,7 +21,7 @@ from claudefm import sprites
 BG = (244,240,232)
 OUT = Path(__file__).resolve().parents[1] / 'art' / 'out' / 'clawd'
 SHOWCASE_PHASES = {
-    'bike': .30, 'walk': .13, 'coding': .13, 'bounce': .47,
+    'bike': .30, 'walk': .26, 'coding': .13, 'bounce': .47,
     'wave': .40, 'coffee': .45, 'napping': .44, 'idle': .58, 'guitar': .05,
 }
 
@@ -43,9 +43,16 @@ def action_period(key):
     return periods[key]
 
 
+def scene_period(key, cols=80):
+    if key in ('walk', 'bike'):
+        from claudefm.locomotion import journey_period
+        return journey_period(key, cols)
+    return action_period(key)
+
+
 def export_motion(out, key, dark, fps=12, cols=80, rows=24):
-    """Capture complete action cycles using the real terminal compositor."""
-    period = action_period(key)
+    """Capture complete journeys/actions using the real terminal compositor."""
+    period = scene_period(key, cols)
     duration = period * max(1, math.ceil(8 / period))
     count = max(2, round(duration * fps))
     shots = [terminal(key, dark, cols, rows, time=i * duration / count)
@@ -61,6 +68,20 @@ def export_motion(out, key, dark, fps=12, cols=80, rows=24):
     frames[0].save(out / name, save_all=True, append_images=frames[1:],
                    duration=delays, loop=0)
     return out / name
+
+
+def export_journey_strip(out, key, dark):
+    duration = scene_period(key)
+    width, height = 400, 264
+    strip = Image.new('RGB', (width * 5, height * 2), BG)
+    draw = ImageDraw.Draw(strip)
+    for i, phase in enumerate((0, .08, .20, .34, .46, .54, .67, .80, .92, .999)):
+        time = duration * phase
+        shot = terminal(key, dark, time=time)
+        x, y = (i % 5) * width, (i // 5) * height
+        strip.paste(shot.resize((width, 240), Image.Resampling.LANCZOS), (x, y))
+        draw.text((x + 8, y + 244), '{}: {:.1f}s'.format(key, time), fill=(65, 59, 53))
+    strip.save(out / ('journey-' + key + ('-dark' if dark else '-light') + '.png'))
 
 
 def export_motion_strip(out, key):
@@ -126,16 +147,18 @@ def main():
     parser.add_argument('--scenes-only',action='store_true')
     parser.add_argument('--scene-motion',action='store_true')
     parser.add_argument('--motion-all', action='store_true',
-                        help='Capture all nine complete actions in both themes')
+                        help='Capture all scenes and full travel journeys in both themes')
     parser.add_argument('--motion-strips', action='store_true',
                         help='Save eight-pose timing strips for every action')
+    parser.add_argument('--journey-strips', action='store_true',
+                        help='Show outbound, rest, turn, and return positions')
     parser.add_argument('--fps', type=int, choices=(12, 24), default=12)
     args=parser.parse_args(); args.out.mkdir(parents=True,exist_ok=True)
     for dark in (False, True):
         montage=Image.new('RGB',(1800,1080),(25,25,30))
         for i,key in enumerate(ACTIVITY_KEYS):
             shot=terminal(key,dark,cols=100,rows=30,
-                          time=action_period(key)*SHOWCASE_PHASES[key])
+                          time=scene_period(key, 100)*SHOWCASE_PHASES[key])
             shot.save(args.out/('scene-'+key+('-dark' if dark else '-light')+'.png'))
             montage.paste(shot.resize((600,360),Image.Resampling.LANCZOS),((i%3)*600,(i//3)*360))
         montage.save(args.out/('scenes-dark.png' if dark else 'scenes-light.png'))
@@ -156,6 +179,10 @@ def main():
     if args.motion_strips:
         for key in ACTIVITY_KEYS:
             export_motion_strip(args.out, key)
+    if args.journey_strips:
+        for key in ('walk', 'bike'):
+            for dark in (False, True):
+                export_journey_strip(args.out, key, dark)
     if args.scenes_only:
         print(args.out);return
     sheet=Image.new('RGB',(3*280,3*210),BG); d=ImageDraw.Draw(sheet)
