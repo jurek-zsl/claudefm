@@ -1,0 +1,349 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths: ['.github/workflows/release.yml']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag; blank uses the current package version'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and build the existing macOS tag
+    runs-on: macos-latest
+    timeout-minutes: 25
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      version: ${{ steps.source.outputs.version }}
+      commit: ${{ steps.source.outputs.commit }}
+      arch: ${{ steps.bundle.outputs.arch }}
+      asset: ${{ steps.bundle.outputs.asset }}
+      artifact: ${{ steps.bundle.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the remote tag and check out its exact source
+        id: source
+        env:
+          EVENT_REF_TYPE: ${{ github.ref_type }}
+          EVENT_REF_NAME: ${{ github.ref_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import ast, os, re, subprocess
+          from pathlib import Path
+          def version():
+              tree = ast.parse(Path('claudefm/__init__.py').read_text())
+              values = [ast.literal_eval(n.value) for n in tree.body
+                        if isinstance(n, ast.Assign)
+                        and any(isinstance(t, ast.Name) and t.id == '__version__' for t in n.targets)]
+              assert len(values) == 1 and isinstance(values[0], str), 'One literal version is required'
+              return values[0]
+          tag = (os.environ['EVENT_REF_NAME'] if os.environ['EVENT_REF_TYPE'] == 'tag'
+                 else os.environ.get('REQUESTED_TAG') or 'v' + version())
+          assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag), 'Expected an existing stable vX.Y.Z tag'
+          # Fetch into FETCH_HEAD only: never create, update or push a tag.
+          subprocess.run(['git', 'fetch', '--no-tags', 'origin', 'refs/tags/' + tag], check=True)
+          commit = subprocess.check_output(['git', 'rev-parse', 'FETCH_HEAD^{commit}'], text=True).strip()
+          assert re.fullmatch(r'[0-9a-f]{40}', commit)
+          subprocess.run(['git', 'checkout', '--detach', commit], check=True)
+          release_version = version()
+          assert tag == 'v' + release_version, 'Tag and tagged package version do not match'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'tag={tag}\nversion={release_version}\ncommit={commit}\n')
+          print(f'Verified existing {tag} at {commit}')
+          PY
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12.16'
+      - name: Run the tagged source tests
+        run: python -m unittest discover -s tests -v
+      - name: Build with the pinned release toolchain
+        env:
+          UV_PYTHON_DOWNLOADS: never
+          UV_PYTHON_PREFERENCE: only-system
+        run: |
+          python -m pip install 'uv==0.13.6'
+          ./build_binary.sh
+      - name: Check the standalone CLI and actual terminal lifecycle
+        env:
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          test "$(dist/claudefm --version)" = "claudefm $RELEASE_VERSION"
+          dist/claudefm --help
+          python - <<'PY'
+          import fcntl, os, pty, re, select, struct, subprocess, termios, time
+          master, slave = pty.openpty()
+          fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 80, 0, 0))
+          original = termios.tcgetattr(slave)
+          process = subprocess.Popen(['dist/claudefm', '--no-audio', '--light', '-a', 'wave'],
+                                     stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+          history = bytearray()
+          def pump(seconds):
+              end = time.monotonic() + seconds
+              chunk = bytearray()
+              while time.monotonic() < end:
+                  if select.select([master], [], [], min(.05, max(0, end-time.monotonic())))[0]:
+                      data = os.read(master, 65536)
+                      chunk.extend(data)
+                      history.extend(data)
+                      assert len(history) < 4_000_000, 'Unexpectedly large terminal output'
+              return bytes(chunk)
+          def expect(text, seconds=12):
+              end = time.monotonic() + seconds
+              start = len(history)
+              while text not in history[start:]:
+                  assert process.poll() is None, bytes(history).decode(errors='replace')[-2000:]
+                  assert time.monotonic() < end, 'Missing terminal output: ' + repr(text)
+                  pump(.1)
+          def scene_updates(data):
+              return [int(row) for row in re.findall(rb'\x1b\[(\d+);1H', data) if 2 <= int(row) <= 21]
+          try:
+              expect(b'Blossom Courtyard')
+              assert b'VISUALS' in history and b'\xe2\x96\x80' in history
+              pump(.7)
+              os.write(master, b' ')
+              pump(.35)  # Drain the frame that was already in flight.
+              assert not scene_updates(pump(.8)), 'Pause did not freeze the rendered scene'
+              os.write(master, b'2')
+              expect(b'Fernwood Trail')
+              os.write(master, b' ')
+              assert scene_updates(pump(3.6)), 'Resume did not restart scene movement'
+              os.write(master, b'q')
+              deadline=time.monotonic()+8
+              while process.poll() is None:
+                  assert time.monotonic()<deadline, 'Standalone CLI did not quit'
+                  pump(.1)  # Keep draining the PTY while the final frame exits.
+              pump(.15)
+              assert process.returncode == 0, 'Standalone CLI failed'
+              assert all(seq in history for seq in (b'\x1b[?2026l', b'\x1b[?25h', b'\x1b[?7h', b'\x1b[?1049l'))
+              restored=termios.tcgetattr(slave)
+              # Darwin may set its transient pending-input flag when canonical
+              # mode returns. All configured tty settings must still match.
+              pending=getattr(termios,'PENDIN',0)
+              restored[3] &= ~pending
+              original[3] &= ~pending
+              assert restored == original, 'Terminal input settings were not restored'
+              print('Standalone render, pause, activity, resume and clean quit passed')
+          finally:
+              if process.poll() is None:
+                  process.kill()
+                  process.wait(timeout=5)
+              os.close(master)
+              os.close(slave)
+          PY
+      - name: Package the tested binary, notices and exact changelog notes
+        id: bundle
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+          SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+          UV_PYTHON_DOWNLOADS: never
+          UV_PYTHON_PREFERENCE: only-system
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-bundle/notices"
+          uv tool run --python 3.12 --from 'pyinstaller==6.22.3' python - <<'PY'
+          import importlib.metadata, os, shutil, sys, sysconfig
+          from pathlib import Path
+          assert sys.version_info[:3] == (3, 12, 16), sys.version
+          notices = Path(os.environ['RUNNER_TEMP']) / 'release-bundle/notices'
+          candidates = [Path(sysconfig.get_path('stdlib'))/'LICENSE.txt',
+                        Path(sys.base_prefix)/'LICENSE.txt', Path(sys.base_prefix)/'LICENSE']
+          license_path = next((p for p in candidates if p.is_file()), None)
+          assert license_path, 'CPython license was not found in the build runtime'
+          shutil.copyfile(license_path, notices/'LICENSE-PYTHON.txt')
+          dist = importlib.metadata.distribution('pyinstaller')
+          assert dist.version == '6.22.3'
+          copying = next(p for p in dist.files if p.name == 'COPYING.txt')
+          shutil.copyfile(dist.locate_file(copying), notices/'LICENSE-PYINSTALLER.txt')
+          PY
+          python - <<'PY'
+          import hashlib, json, os, platform, re, shutil, subprocess, tarfile
+          from pathlib import Path
+          version, tag, commit = (os.environ[n] for n in ('RELEASE_VERSION','RELEASE_TAG','SOURCE_COMMIT'))
+          arch = platform.machine()
+          assert arch in ('arm64','x86_64'), arch
+          actual = subprocess.check_output(['lipo','-archs','dist/claudefm'], text=True).split()
+          assert actual == [arch], f'Binary architecture {actual} does not match {arch}'
+          out = Path(os.environ['RUNNER_TEMP'])/'release-bundle'
+          name = f'claudefm-{tag}-macos-{arch}'
+          root = out/name
+          root.mkdir()
+          shutil.copy2('dist/claudefm', root/'claudefm')
+          for filename in ('LICENSE','NOTICE'):
+              shutil.copyfile(filename, root/filename)
+          shutil.copytree(out/'notices', root/'third-party-notices')
+          metadata = dict(tag=tag, version=version, source_commit=commit, arch=arch,
+                          asset=name+'.tar.gz', python='3.12.16', pyinstaller='6.22.3', uv='0.13.6')
+          (root/'BUILD_INFO.json').write_text(json.dumps(metadata, indent=2)+'\n')
+          archive = out/metadata['asset']
+          with tarfile.open(archive, 'w:gz') as tar:
+              tar.add(root, arcname=name)
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          (out/'SHA256SUMS').write_text(f'{digest}  {archive.name}\n')
+          (out/'release.json').write_text(json.dumps(metadata, indent=2)+'\n')
+          changelog = Path('CHANGELOG.md').read_text()
+          section = re.search(r'^## '+re.escape(version)+r'\b[^\n]*\n(.*?)(?=^## |\Z)', changelog, re.M|re.S)
+          assert section and section[1].strip(), 'Tagged version is missing from CHANGELOG.md'
+          notes = (section[1].strip()+f'\n\nSource commit: `{commit}`\n\n'
+                   f'The macOS **{arch}** archive contains the tested standalone CLI, project LICENSE/NOTICE, '
+                   'and CPython/PyInstaller license texts. Audio still requires separately installed mpv and yt-dlp.\n'
+                   'Verify the download with `shasum -a 256 -c SHA256SUMS`.\n')
+          (out/'release-notes.md').write_text(notes)
+          artifact = 'release-bundle-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write(f'arch={arch}\nasset={archive.name}\nartifact={artifact}\n')
+          print(f'Packaged {archive.name}: {digest}')
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.bundle.outputs.artifact }}
+          path: |
+            ${{ runner.temp }}/release-bundle/*.tar.gz
+            ${{ runner.temp }}/release-bundle/SHA256SUMS
+            ${{ runner.temp }}/release-bundle/release.json
+            ${{ runner.temp }}/release-bundle/release-notes.md
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish only the verified artifact bundle
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # No checkout and no application execution in this write-scoped job.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: release-bundle
+          digest-mismatch: error
+      - name: Verify, complete a draft if necessary, and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_TAG: ${{ needs.build.outputs.tag }}
+          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+          EXPECTED_COMMIT: ${{ needs.build.outputs.commit }}
+          EXPECTED_ARCH: ${{ needs.build.outputs.arch }}
+          EXPECTED_ASSET: ${{ needs.build.outputs.asset }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, subprocess, tarfile, tempfile
+          from pathlib import Path
+          repo = os.environ['GH_REPO']
+          tag, version, commit, arch, asset = (os.environ['EXPECTED_'+n] for n in ('TAG','VERSION','COMMIT','ARCH','ASSET'))
+          assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',tag) and tag=='v'+version
+          assert re.fullmatch(r'[0-9a-f]{40}',commit)
+          assert arch in ('arm64','x86_64') and asset==f'claudefm-{tag}-macos-{arch}.tar.gz'
+          bundle = Path('release-bundle')
+          expected = dict(tag=tag, version=version, source_commit=commit, arch=arch, asset=asset)
+          def gh(*args):
+              return subprocess.check_output(['gh',*args],text=True)
+          def api(path, missing_ok=False):
+              result = subprocess.run(['gh','api',path],text=True,capture_output=True)
+              if result.returncode:
+                  if missing_ok and 'HTTP 404' in result.stderr:return None
+                  raise RuntimeError(result.stderr)
+              return json.loads(result.stdout)
+          def verify_tag():
+              obj = api(f'repos/{repo}/git/ref/tags/{tag}')['object']
+              for _ in range(5):
+                  if obj['type']=='commit':break
+                  assert obj['type']=='tag', 'Release tag does not resolve to a commit'
+                  obj = api(f'repos/{repo}/git/tags/'+obj['sha'])['object']
+              assert obj['type']=='commit' and obj['sha']==commit, 'Remote tag changed since the tested build'
+          def verify_archive(path):
+              with tarfile.open(path,'r:gz') as archive:
+                  root=asset.removesuffix('.tar.gz')
+                  members=archive.getmembers()
+                  names={member.name for member in members}
+                  required={root+'/'+n for n in ('claudefm','LICENSE','NOTICE','BUILD_INFO.json',
+                            'third-party-notices/LICENSE-PYTHON.txt','third-party-notices/LICENSE-PYINSTALLER.txt')}
+                  directories={root,root+'/third-party-notices'}
+                  assert len(names)==len(members), 'Release archive has duplicate paths'
+                  assert names==required|directories, 'Release archive has missing or unexpected paths'
+                  for member in members:
+                      assert member.isdir() if member.name in directories else member.isfile(), 'Archive member is not a regular file/directory'
+                      assert member.mode & ~0o777 == 0, 'Archive has special permission bits'
+                  assert archive.getmember(root+'/claudefm').mode & 0o111, 'CLI lost its executable mode'
+                  metadata=json.load(archive.extractfile(root+'/BUILD_INFO.json'))
+                  assert all(metadata.get(k)==v for k,v in expected.items()), 'Archive source metadata differs'
+          def verify_pair(directory):
+              entries=(directory/'SHA256SUMS').read_text().splitlines()
+              assert len(entries)==1, 'Expected one archive checksum'
+              digest, filename=entries[0].split()
+              assert filename==asset and re.fullmatch(r'[0-9a-f]{64}',digest)
+              assert hashlib.sha256((directory/asset).read_bytes()).hexdigest()==digest, 'Archive checksum mismatch'
+              verify_archive(directory/asset)
+              return digest
+          metadata=json.loads((bundle/'release.json').read_text())
+          assert all(metadata.get(k)==v for k,v in expected.items())
+          verify_pair(bundle)
+          verify_tag()
+          endpoint=f'repos/{repo}/releases/tags/{tag}'
+          def find_release():
+              # The tag endpoint only returns published releases. Listing also
+              # finds drafts visible to this repository-scoped write token.
+              pages=json.loads(gh('api','--paginate','--slurp',f'repos/{repo}/releases?per_page=100'))
+              matches=[r for page in pages for r in page if r['tag_name']==tag]
+              assert len(matches)<=1, 'Multiple releases use this tag'
+              return matches[0] if matches else None
+          release=find_release()
+          if release is None:
+              gh('release','create',tag,'--draft','--verify-tag','--target',commit,
+                 '--title','Claude FM '+tag,'--notes-file',str(bundle/'release-notes.md'))
+              release=find_release()
+              assert release is not None, 'Created draft was not returned by the release API'
+          assert release['tag_name']==tag and f'Source commit: `{commit}`' in (release.get('body') or ''), 'Existing release has different source provenance'
+          assets={a['name']:a for a in release['assets']}
+          assert set(assets)<={asset,'SHA256SUMS'}, 'Existing release has unexpected assets; refusing to alter it'
+          with tempfile.TemporaryDirectory() as work:
+              verified=Path(work)
+              for filename in assets:
+                  assert assets[filename]['state']=='uploaded', 'Existing upload is incomplete'
+                  gh('release','download',tag,'--pattern',filename,'--dir',str(verified))
+              if not release['draft']:
+                  assert set(assets)=={asset,'SHA256SUMS'}, 'Published release is incomplete; refusing to overwrite it'
+                  digest=verify_pair(verified)
+                  print(f'Existing published {tag} verified ({digest}); leaving it unchanged')
+              else:
+                  if asset not in assets:
+                      assert 'SHA256SUMS' not in assets, 'Draft checksum has no matching archive; manual review is required'
+                      gh('release','upload',tag,str(bundle/asset))
+                      (verified/asset).write_bytes((bundle/asset).read_bytes())
+                  verify_archive(verified/asset)
+                  if 'SHA256SUMS' not in assets:
+                      digest=hashlib.sha256((verified/asset).read_bytes()).hexdigest()
+                      (verified/'SHA256SUMS').write_text(f'{digest}  {asset}\n')
+                      gh('release','upload',tag,str(verified/'SHA256SUMS'))
+                  # Download both uploaded files afresh before making the draft public.
+                  fresh=verified/'remote';fresh.mkdir()
+                  gh('release','download',tag,'--pattern',asset,'--pattern','SHA256SUMS','--dir',str(fresh))
+                  digest=verify_pair(fresh)
+                  verify_tag()
+                  gh('release','edit',tag,'--draft=false')
+                  print(f'Published {tag} with verified archive {digest}')
+          final=api(endpoint)
+          assert not final['draft'] and {a['name'] for a in final['assets']}=={asset,'SHA256SUMS'}
+          verify_tag()
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as summary:
+              summary.write(f"## Release {tag}\n\n{final['html_url']}\n\nSource: `{commit}`\n\nArchive: `{asset}`\n\nSHA-256: `{digest}`\n")
+          PY

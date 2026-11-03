@@ -37,6 +37,15 @@ brew upgrade jurek-zsl/claudefm/claudefm
 ```
 
 <details>
+<summary>Download a standalone macOS binary</summary>
+
+Download the macOS archive from [GitHub Releases](https://github.com/jurek-zsl/claudefm/releases/latest). The filename identifies its CPU architecture. Extract it and run the included `claudefm` executable. The release includes SHA-256 checksums and license files.
+
+Python is bundled. Audio still requires `mpv` and `yt-dlp`, which you can install with `brew install mpv yt-dlp`. Homebrew remains the recommended installation method.
+
+</details>
+
+<details>
 <summary>Install with pipx instead (macOS or Linux)</summary>
 
 Install `mpv`, `yt-dlp`, and `pipx` with your package manager. On macOS, use `brew install mpv yt-dlp pipx`. Then install the CLI from this repository:

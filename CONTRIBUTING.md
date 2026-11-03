@@ -94,6 +94,8 @@ For a new version:
 
 4. Update the formula's archive URL and `sha256`, test the installation, and commit the formula change. Use the new version in the commands above for each release.
 
+Pushing a stable `vX.Y.Z` tag runs the Release workflow. It verifies the version, builds and tests that exact tagged source, then publishes a GitHub Release with a macOS binary bundle, license files, and SHA-256 checksums. Existing tags and published assets are preserved. The workflow can also be run manually for an existing tag; changes to the release workflow itself publish the current tagged version to support its initial setup.
+
 The formula has no bottles; Homebrew installs from the verified source archive. The formula currently supports macOS; the pipx and source installations also support Linux.
 
 ## Pull requests and issues
