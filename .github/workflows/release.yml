@@ -255,8 +255,22 @@ jobs:
           EXPECTED_ASSET: ${{ needs.build.outputs.asset }}
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, re, subprocess, tarfile, tempfile
+          import hashlib, json, os, re, subprocess, sys, tarfile, tempfile
           from pathlib import Path
+          def safe_error_text(message):
+              token=os.environ.get('GH_TOKEN')
+              if token:message=message.replace(token,'[REDACTED]')
+              return message[:2000]
+          def report_error(kind, error, traceback):
+              line=None
+              while traceback is not None:
+                  line=traceback.tb_lineno
+                  traceback=traceback.tb_next
+              location=f' at publisher line {line}' if line is not None else ''
+              message=safe_error_text(f'{kind.__name__}{location}: {error}')
+              message=message.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::error::'+message,file=sys.stderr,flush=True)
+          sys.excepthook=report_error
           repo = os.environ['GH_REPO']
           tag, version, commit, arch, asset = (os.environ['EXPECTED_'+n] for n in ('TAG','VERSION','COMMIT','ARCH','ASSET'))
           assert re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+',tag) and tag=='v'+version
@@ -265,12 +279,18 @@ jobs:
           bundle = Path('release-bundle')
           expected = dict(tag=tag, version=version, source_commit=commit, arch=arch, asset=asset)
           def gh(*args):
-              return subprocess.check_output(['gh',*args],text=True)
+              result=subprocess.run(['gh',*args],text=True,capture_output=True)
+              if result.returncode:
+                  stage=' '.join(args[:2])
+                  detail=safe_error_text(result.stderr.strip()) or 'no error detail'
+                  raise RuntimeError(f'gh {stage} failed (exit {result.returncode}): {detail}')
+              return result.stdout
           def api(path, missing_ok=False):
               result = subprocess.run(['gh','api',path],text=True,capture_output=True)
               if result.returncode:
                   if missing_ok and 'HTTP 404' in result.stderr:return None
-                  raise RuntimeError(result.stderr)
+                  detail=safe_error_text(result.stderr.strip()) or 'no error detail'
+                  raise RuntimeError(f'gh api failed (exit {result.returncode}): {detail}')
               return json.loads(result.stdout)
           def verify_tag():
               obj = api(f'repos/{repo}/git/ref/tags/{tag}')['object']
