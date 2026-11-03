@@ -170,14 +170,17 @@ class TUI:
         sys.stdout.flush()
 
     def restore_terminal(self):
-        # Re-enable autowrap, show cursor, restore main buffer, restore termios
-        sys.stdout.write("\033[?7h\033[?25h\033[?1049l")
-        sys.stdout.flush()
-        if self.old_termios:
-            try:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_termios)
-            except Exception:
-                pass
+        # End any interrupted synchronized frame before restoring the terminal.
+        # Even a closed stdout pipe must not prevent restoration of tty input.
+        try:
+            sys.stdout.write("\033[?2026l\033[?7h\033[?25h\033[?1049l")
+            sys.stdout.flush()
+        finally:
+            if self.old_termios:
+                try:
+                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_termios)
+                except Exception:
+                    pass
 
     def handle_input(self):
         # Non-blocking read straight from the raw fd (not sys.stdin.read).
@@ -392,8 +395,13 @@ class TUI:
                 writes.append('\033[{};1H{}'.format(row+1, line))
         if writes:
             # Cursor-address each changed row, never print a newline at the floor.
-            sys.stdout.write(''.join(writes))
-            sys.stdout.flush()
+            try:
+                sys.stdout.write("\033[?2026h" + ''.join(writes))
+            finally:
+                # Synchronized output is held only while writing this frame.
+                # Also attempt the reset when a write or interrupt aborts it.
+                sys.stdout.write("\033[?2026l")
+                sys.stdout.flush()
         self._previous_lines, self._previous_size = lines, size
 
     def _render_help_overlay(self, out_lines, cols, rows):
@@ -457,6 +465,8 @@ class TUI:
                 time.sleep(sleep_time)
 
         finally:
-            self.restore_terminal()
-            self.audio.stop()
+            try:
+                self.restore_terminal()
+            finally:
+                self.audio.stop()
             print("\n Claude FM stopped. Keep building! ✨\n")

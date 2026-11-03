@@ -108,18 +108,118 @@ def _rest_arms(c, y=10):
     _arm(c,(26,y+6),(26,y+7),(25,y+4))
 
 
+# Authored poses have holds and unequal transition times. Each table returns to
+# the same quiet pose; eye and hand tracks deliberately lead or lag the torso.
+ACTING_BEATS = {
+    'wave': ((0,'rest'),(.85,'notice'),(1.4,'gather'),(2.2,'raise'),
+             (2.9,'first wave'),(3.7,'hold'),(4.05,'second wave'),
+             (5.0,'lower'),(5.7,'follow through'),(6.2,'rest')),
+    'coffee': ((0,'rest'),(1.4,'notice mug'),(2.25,'gather'),(3,'lift'),
+               (4.25,'sip'),(6.5,'lower'),(7.8,'settle'),(8.4,'rest')),
+    'idle': ((0,'rest'),(1.8,'look left'),(2.3,'lean left'),(4.1,'recover'),
+             (5.1,'rest'),(6.3,'look right'),(6.9,'lean right'),
+             (8.4,'recover'),(9.4,'rest')),
+    'napping': ((0,'rest'),(.7,'snuggle'),(1.6,'inhale'),(2.7,'hold'),
+                (3.3,'sigh'),(6.4,'rest')),
+    'bounce': ((0,'rest'),(1.25,'look down'),(1.5,'gather'),(1.8,'launch'),
+               (2.25,'apex'),(2.7,'land'),(2.9,'rebound'),(3.3,'rest')),
+}
+
+_WAVE = {
+    'look': ((0,0),(.8,0),(1.05,1),(5.7,1),(6.15,0),(8,0)),
+    'lean': ((0,0),(1.2,0),(1.55,-.7),(2.2,-2),(2.8,-2),
+             (3.2,-1),(3.7,-1),(4.05,-2),(4.55,-1.4),(5.0,-1.4),
+             (5.6,.7),(6.2,0),(8,0)),
+    'drop': ((0,0),(1.2,0),(1.48,1),(1.65,1),(2.0,0),(8,0)),
+    'hand_x': ((0,25),(1.1,25),(1.45,26),(1.75,29),(2.2,31),
+               (2.55,30),(2.9,32),(3.2,29),(3.7,29),(4.05,32),
+               (4.38,30),(4.65,30),(5,30),(5.45,28),(5.7,25),(8,25)),
+    'hand_y': ((0,14),(1.1,14),(1.45,15),(1.75,14),(2.2,9),
+               (2.55,6),(2.9,7),(3.2,6),(3.7,6),(4.05,7),
+               (4.38,6),(4.65,6),(5,8),(5.45,13),(5.7,16),(6.15,14),(8,14)),
+}
+_COFFEE = {
+    'look': ((0,0),(1.3,0),(1.55,1),(3.75,1),(4.2,0),
+             (6.5,0),(6.9,1),(8.2,1),(8.6,0),(12,0)),
+    'look_y': ((0,0),(1.3,0),(1.7,1),(2.5,1),(3.1,0),(12,0)),
+    'lean': ((0,0),(1.85,0),(2.4,-1),(3.1,-1),(4.25,1.3),
+             (6.5,1.3),(7.4,-.7),(8.4,0),(12,0)),
+    'drop': ((0,0),(2.05,0),(2.35,1),(2.6,1),(3.0,0),
+             (7.5,0),(7.8,1),(8.25,0),(12,0)),
+    'cup_x': ((0,27),(1.85,27),(2.4,28),(3,30),(3.7,29),
+              (4.25,26),(6.5,26),(7.3,28),(7.8,27),(12,27)),
+    'cup_y': ((0,17),(1.85,17),(2.4,18),(3,16),(3.7,14),
+              (4.25,14),(6.5,14),(7.3,16),(7.8,18),(8.35,17),(12,17)),
+}
+_IDLE = {
+    'look': ((0,0),(1.7,0),(1.95,-1),(3.95,-1),(4.15,0),
+             (6.2,0),(6.4,1),(8.1,1),(8.3,0),(12,0)),
+    'look_y': ((0,0),(9.7,0),(10.0,1),(10.5,1),(10.85,0),(12,0)),
+    'lean': ((0,0),(2.15,0),(2.75,-2),(3.95,-2),(4.65,.6),
+             (5.1,0),(6.7,0),(7.4,2),(8.1,2),(8.95,-.6),(9.4,0),(12,0)),
+}
+_NAP = {
+    'lean': ((0,0),(.4,0),(1.1,-1.2),(2.8,-1.2),(4.8,-.3),(6.6,0),(8,0)),
+    'breath': ((0,0),(.6,0),(1.6,.5),(2.5,1),(3.1,1),(6.4,0),(8,0)),
+    'snuggle': ((0,0),(.45,0),(.85,1),(1.25,1),(1.8,0),(8,0)),
+    'droop': ((0,0),(3.2,0),(4.2,1),(5.8,1),(6.5,0),(8,0)),
+}
+
+
+def _shear_offsets(height, lean, hip_shift=None):
+    if hip_shift is None:hip_shift=round(lean*.35)
+    return [round(lean*(1-(row+.5)/height)+hip_shift*((row+.5)/height))
+            for row in range(height)]
+
+
+def _acting_torso(c, y=10, height=12, lean=0, look=0, look_y=0,
+                  blink=False, closed=False, hip_shift=None):
+    """Flat row-wise lean, anchored at the hips; the two eyes stay square."""
+    offsets=_shear_offsets(height,lean,hip_shift)
+    for row,offset in enumerate(offsets):
+        c.rect(11+offset,y+row,16,1)
+    eye_y=(4 if closed else 2)+round(look_y)
+    eye_offset=offsets[max(0,min(height-1,eye_y))]
+    for ex in (3,11):
+        c.rect(11+eye_offset+ex+round(look),y+eye_y,
+               2,1 if blink or closed else 2,'E')
+    shoulder_row=min(6,height-1)
+    return (11+offsets[shoulder_row],y+shoulder_row),(26+offsets[shoulder_row],y+shoulder_row)
+
+
+def _acting_legs(c, lean, hip_y=22):
+    """Counter-angled legs retain the exact same four ground footprints."""
+    shift=round(lean*.35)
+    for foot in (11,15,21,25):
+        hip=foot+shift
+        c.line(hip,hip_y,hip,23,thickness=2)
+        c.line(hip,23,foot,23,thickness=2)
+        c.rect(foot,24,2,2)
+
+
+def _relaxed_acting_arms(c, left, right, lean=0):
+    # The far hand drops as the torso counterbalances; elbows follow late.
+    _arm(c,left,(left[0]-1,left[1]+1),
+         (left[0]-2,left[1]-2+round(max(0,lean)*.4)))
+    _arm(c,right,(right[0]+1,right[1]+1),
+         (right[0]-1,right[1]-2+round(max(0,-lean)*.4)))
+
+
 def _hop_state(t):
-    """Shared flight/contact geometry for the actor and its floor shadow."""
+    """Authored gather/stretch around one shared ballistic contact trajectory."""
     p=t % ACTIVITY_PERIODS['bounce']
     if 1.8 <= p < 2.7:
         u=(p-1.8)/.9
-        lift=20*u*(1-u)  # ballistics: one gravity-driven arc, five pixels high
-        return lift, 10-round(lift), 12, u
-    if 1.5 <= p < 1.8 or 2.7 <= p < 2.9:
-        return 0, 11, 11, None
+        lift=20*u*(1-u)
+        stretch=1 if p<1.96 else 0
+        return lift,10-round(lift)-stretch,12+stretch,u
+    if 1.67 <= p < 1.8 or 2.7 <= p < 2.8:
+        return 0,12,10,None
+    if 1.5 <= p < 1.67 or 2.8 <= p < 2.9:
+        return 0,11,11,None
     if 2.9 <= p < 3.08:
-        return 0, 9, 13, None  # a short spring recovery with the feet planted
-    return 0, 10, 12, None
+        return 0,9,13,None
+    return 0,10,12,None
 
 
 def contact_shadows(key, elapsed):
@@ -206,34 +306,50 @@ def _draw(key, t, blink, travel=None):
         _arm(c,(7,16),(5,18),(4,19),(3,3))
         _arm(c,(22,16),(24,18),(23,19+tap),(3,2))
     elif key == 'bounce':
+        p=t % ACTIVITY_PERIODS[key]
         lift,y,h,flight=_hop_state(t)
+        lean=_track(p,((0,0),(1.45,0),(1.7,-.8),(1.95,1),
+                       (2.2,0),(2.6,-.6),(2.8,-.6),(3.15,.4),(3.5,0),(4.8,0)))
         if flight is None:
-            _legs(c,y+h)
+            _acting_legs(c,lean,y+h)
         else:
-            # Feet tuck just a little near the apex, then extend for landing.
             tuck=round(math.sin(math.pi*flight))
             feet=[(x,25-round(lift)-tuck) for x in (11,15,21,25)]
             _legs(c,y+h,feet)
-        _torso(c,y=y,height=h,blink=blink)
-        lag=round(math.sin(math.pi*flight)) if flight is not None else 0
-        _arm(c,(11,y+6),(9,y+7),(9,y+4-lag))
-        _arm(c,(26,y+6),(28,y+7),(25,y+4-lag))
+        look_y=_track(p,((0,0),(1.15,0),(1.35,1),(1.7,1),(1.9,-1),
+                         (2.12,-1),(2.3,0),(4.8,0)))
+        left,right=_acting_torso(c,y=y,height=h,lean=lean,look_y=look_y,blink=blink)
+        lag=_track(p,((0,0),(1.4,0),(1.68,2),(1.84,2),(2.14,-2),
+                      (2.35,-2),(2.65,0),(2.78,2),(2.95,2),(3.3,0),(4.8,0)))
+        _arm(c,left,(left[0]-2,left[1]+1),(9,y+4+round(lag)))
+        _arm(c,right,(right[0]+2,right[1]+1),(25,y+4+round(lag)))
     elif key == 'wave':
         p=t % ACTIVITY_PERIODS[key]
-        reach=_track(p,[(0,0),(1.5,0),(2.3,1),(4.5,1),(5.4,0),(8,0)])
-        wag=round(math.sin((p-2.3)*tau/1.1)) if 2.3<p<4.5 else 0
-        _legs(c);_torso(c,blink=blink)
-        _arm(c,(11,16),(10,17),(9,14))
-        _arm(c,(26,16),(27+round(2*reach),16-round(reach)),
-             (25+round(4*reach)+wag,14-round(7*reach)))
+        lean=_track(p,_WAVE['lean']);drop=round(_track(p,_WAVE['drop']))
+        _acting_legs(c,lean)
+        left,right=_acting_torso(c,y=10+drop,height=12-drop,lean=lean,
+                                 look=_track(p,_WAVE['look']),blink=blink)
+        _arm(c,left,(left[0]-1,left[1]+2),
+             (left[0]-2,left[1]-2+round(max(0,-lean)*.5)))
+        hand=(round(_track(p,_WAVE['hand_x'])),round(_track(p,_WAVE['hand_y'])))
+        reach=max(0,min(1,(14-hand[1])/8))
+        elbow=(right[0]+2+round(reach*2),right[1]-round(reach*2))
+        _arm(c,right,elbow,hand)
     elif key == 'coffee':
         p=t % ACTIVITY_PERIODS[key]
-        sip=_track(p,[(0,0),(3,0),(4.25,1),(6.5,1),(7.75,0),(12,0)])
-        mx,my=27-round(3*sip),17-round(3*sip)
-        _legs(c);_torso(c,blink=blink,closed=sip>.85)
-        _arm(c,(11,16),(10,17),(9,14))
-        # The forearm stays behind the cup, and a visible front grip is last.
-        c.line(26,16,mx-1,my+3,thickness=2)
+        lean=_track(p,_COFFEE['lean']);drop=round(_track(p,_COFFEE['drop']))
+        mx,my=round(_track(p,_COFFEE['cup_x'])),round(_track(p,_COFFEE['cup_y']))
+        sipping=4.15<=p<=6.5
+        _acting_legs(c,lean)
+        left,right=_acting_torso(c,y=10+drop,height=12-drop,lean=lean,
+                                 look=_track(p,_COFFEE['look']),
+                                 look_y=_track(p,_COFFEE['look_y']),
+                                 blink=blink,closed=sipping)
+        _arm(c,left,(left[0]-1,left[1]+1),(left[0]-2,left[1]-2))
+        # Cup and grip share the authored arc. The forearm sits behind the mug.
+        elbow=(max(right[0]+1,mx),max(right[1]+1,my+3))
+        c.line(*right,*elbow,thickness=2)
+        c.line(*elbow,mx,my+3,thickness=2)
         c.rect(mx,my,5,5,'G');c.rect(mx+1,my,3,1,'g')
         c.rect(mx+5,my+1,2,3,'G');c.rect(mx+5,my+2,1,1,' ')
         c.rect(mx-1,my+2,3,2)
@@ -245,13 +361,13 @@ def _draw(key, t, blink, travel=None):
             if .2<age<.7:c.rect(sx+1,sy-1,1,1,'S')
     elif key == 'napping':
         c.rect(6,24,28,2,'Z');c.rect(8,23,24,1,'Z')
-        p=(t % ACTIVITY_PERIODS[key])/ACTIVITY_PERIODS[key]
-        breath=round((1-math.cos(tau*p))*.5)
-        # Lower edge and cushion stay planted while the upper body rises.
-        y=14-breath
-        _torso(c,11,y,height=9+breath,closed=True,look_y=1 if .73<p<.94 else 0)
-        _arm(c,(11,20),(10,21),(8,19))
-        _arm(c,(26,20),(28,21),(27,19))
+        p=t % ACTIVITY_PERIODS[key]
+        breath=round(_track(p,_NAP['breath']))
+        lean=_track(p,_NAP['lean']);snuggle=round(_track(p,_NAP['snuggle']))
+        left,right=_acting_torso(c,y=14-breath,height=9+breath,lean=lean,
+                                 look_y=_track(p,_NAP['droop']),closed=True,hip_shift=0)
+        _arm(c,left,(10,21),(8,19-snuggle))
+        _arm(c,right,(28,21),(27,19-snuggle))
     elif key == 'guitar':
         p=t % ACTIVITY_PERIODS[key]
         stroke=_track(p%1.6,[(0,0),(.12,0),(.29,1),(.48,1),(1.05,0),(1.6,0)])
@@ -266,13 +382,11 @@ def _draw(key, t, blink, travel=None):
         _arm(c,(11,16),(16,17),(20,18+round(3*stroke)),(3,2))
     else:
         p=t % ACTIVITY_PERIODS['idle']
-        expand=1 if (1-math.cos(tau*p/6))*.5>.75 else 0
-        look=_track(p,[(0,0),(2.4,0),(2.8,-1),(4.1,-1),(4.5,0),
-                       (6.5,0),(6.9,1),(8.2,1),(8.6,0),(12,0)])
-        down=_track(p,[(0,0),(9.2,0),(9.5,1),(10.1,1),(10.4,0),(12,0)])
-        _legs(c)
-        _torso(c,y=10-expand,height=12+expand,look=look,look_y=down,blink=blink)
-        _rest_arms(c,10-expand)
+        lean=_track(p,_IDLE['lean'])
+        _acting_legs(c,lean)
+        left,right=_acting_torso(c,lean=lean,look=_track(p,_IDLE['look']),
+                                 look_y=_track(p,_IDLE['look_y']),blink=blink)
+        _relaxed_acting_arms(c,left,right,lean)
     return c.rows()
 
 

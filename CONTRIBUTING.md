@@ -42,6 +42,8 @@ Standalone builds use `uv` (install it with `python -m pip install uv` if needed
 
 ## Visual changes
 
+Read [the animation direction and source research](docs/ANIMATION_DESIGN.md) before changing Clawd's rig. Export an offline pose inspector with `python3 scripts/animation_lab.py`; it supports frame stepping, onion skins, and before/after snapshots without extra dependencies.
+
 The app has no Python runtime dependencies. Pillow is an optional development tool for previews:
 
 ```sh

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 — 2026-11-03
+
+- Reauthored waving, coffee, idle, napping, and bouncing with deliberate key poses, eye-leading anticipation, body counterbalance, held gestures, and hand follow-through.
+- Kept feet, cushions, held props, and jump shadows connected to the same grounded action geometry.
+- Added an offline animation lab with frame stepping, onion skins, pixel grids, world-space contacts, and before/after comparisons at equal elapsed time.
+- Documented original-stream research, useful animation skills and tools, and the practical limits of half-block rendering.
+- Added synchronized frame output to reduce partial-update tearing on supporting terminals, with cleanup on rendering failure and exit.
+
 ## 1.1.1 — 2026-11-03
 
 - Walking and cycling now travel between visible foreground destinations, rest, turn, and return.

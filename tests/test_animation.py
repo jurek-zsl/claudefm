@@ -187,5 +187,79 @@ class AnimationTests(unittest.TestCase):
             self.assertEqual(out.getvalue(),'')
             self.assertEqual(tui.animation_time,0)
 
+    @staticmethod
+    def eye_pixels(pose):
+        return {(x,y) for y,row in enumerate(pose) for x,ch in enumerate(row) if ch=='E'}
+
+    @staticmethod
+    def without_steam(pose):
+        return [row.replace('S',' ') for row in pose]
+
+    def test_idle_and_wave_eyes_lead_a_grounded_counterbalanced_lean(self):
+        for key,notice,lean_time in [('idle',2.0,3.2),('wave',1.1,2.7)]:
+            rest=sample_activity(key,0)
+            looking=sample_activity(key,notice)
+            leaning=sample_activity(key,lean_time)
+            self.assertNotEqual(self.eye_pixels(rest),self.eye_pixels(looking),key)
+            head_left=lambda pose:min(x for x,ch in enumerate(pose[10]) if ch in 'CE')
+            self.assertEqual(head_left(rest),head_left(looking),key)
+            self.assertLess(head_left(leaning),head_left(rest),key)
+            for frame in range(round(ACTIVITY_PERIODS[key]*24)):
+                self.assertEqual(sample_activity(key,frame/24)[-1],rest[-1],(key,frame))
+        # The raised hand and torso move in opposite directions, with a real hold.
+        self.assertEqual(sample_activity('wave',3.3),sample_activity('wave',3.6))
+        raised=sample_activity('wave',2.7)
+        self.assertTrue(any('C' in row[29:] for row in raised[:10]))
+
+    def test_coffee_gaze_precedes_weighted_cup_arc_and_a_held_sip(self):
+        rest=sample_activity('coffee',0)
+        notice=sample_activity('coffee',1.7)
+        cup=lambda pose:{(x,y) for y,row in enumerate(pose) for x,ch in enumerate(row) if ch in 'Gg'}
+        self.assertEqual(cup(rest),cup(notice))
+        self.assertNotEqual(self.eye_pixels(rest),self.eye_pixels(notice))
+        lifted=sample_activity('coffee',3.0)
+        sipping=sample_activity('coffee',4.6)
+        self.assertGreater(min(x for x,y in cup(lifted)),min(x for x,y in cup(rest)))
+        self.assertLess(min(x for x,y in cup(sipping)),min(x for x,y in cup(lifted)))
+        self.assertEqual(self.without_steam(sipping),self.without_steam(sample_activity('coffee',6.1)))
+        self.assertEqual(len(self.eye_pixels(sipping)),4)
+        for frame in range(round(ACTIVITY_PERIODS['coffee']*24)):
+            self.assertEqual(sample_activity('coffee',frame/24)[-1],rest[-1],frame)
+
+    def test_nap_snuggles_before_a_slow_exhale_without_moving_its_lower_edge(self):
+        rest=sample_activity('napping',0)
+        snuggle=sample_activity('napping',1)
+        hand_top=lambda pose:min(y for y,row in enumerate(pose) if row[8]=='C')
+        self.assertLess(hand_top(snuggle),hand_top(rest))
+        body_top=lambda pose:min(y for y,row in enumerate(pose) if 'C' in row)
+        self.assertEqual(body_top(sample_activity('napping',1.4)),14)
+        self.assertEqual(body_top(sample_activity('napping',1.8)),13)
+        self.assertEqual(body_top(sample_activity('napping',4.4)),13)
+        self.assertEqual(body_top(sample_activity('napping',5.0)),14)
+        for frame in range(round(ACTIVITY_PERIODS['napping']*24)):
+            pose=sample_activity('napping',frame/24)
+            # Hands may snuggle above the cushion; the body base stays put.
+            self.assertEqual(pose[22][11:27],rest[22][11:27],frame)
+            self.assertEqual(pose[23:],rest[23:],frame)
+
+    def test_authored_poses_keep_two_intact_square_or_peacefully_closed_eyes(self):
+        for key in ('wave','coffee','idle','napping','bounce'):
+            for frame in range(round(ACTIVITY_PERIODS[key]*24)):
+                eyes=self.eye_pixels(sample_activity(key,frame/24))
+                groups=[]
+                while eyes:
+                    group={eyes.pop()};todo=list(group)
+                    while todo:
+                        x,y=todo.pop()
+                        for neighbor in ((x-1,y),(x+1,y),(x,y-1),(x,y+1)):
+                            if neighbor in eyes:
+                                eyes.remove(neighbor);group.add(neighbor);todo.append(neighbor)
+                    groups.append(group)
+                self.assertEqual(len(groups),2,(key,frame))
+                for eye in groups:
+                    self.assertEqual(max(x for x,y in eye)-min(x for x,y in eye),1,(key,frame))
+                    self.assertIn(len(eye),(2,4),(key,frame))
+
+
 
 if __name__=='__main__':unittest.main()

@@ -1,5 +1,9 @@
 """Contact shadows stay on the floor and leave cached scenery reusable."""
+import io
+import sys
+import termios
 import unittest
+from unittest.mock import patch
 
 from claudefm.audio import AudioPlayer
 from claudefm.scene import render_background
@@ -32,6 +36,78 @@ class GroundingTests(unittest.TestCase):
         first = tui.render_lines(80, 24)
         self.assertEqual(render_background(80, 40, 'bike', False, 0), before)
         self.assertEqual(tui.render_lines(80, 24), first)
+
+
+class SynchronizedOutputTests(unittest.TestCase):
+    def tui(self):
+        tui=TUI(AudioPlayer(enabled=False),initial_theme='light')
+        tui.start_time=100
+        return tui
+
+    def test_changed_rows_form_one_balanced_frame_with_resize_inside(self):
+        tui=self.tui()
+        with patch('claudefm.tui.shutil.get_terminal_size',return_value=(80,24)), \
+             patch('claudefm.tui.time.monotonic',return_value=100), \
+             patch('claudefm.tui.sys.stdout',new_callable=io.StringIO) as out:
+            tui.render()
+            written=out.getvalue()
+            self.assertTrue(written.startswith('\033[?2026h'))
+            self.assertTrue(written.endswith('\033[?2026l'))
+            self.assertEqual(written.count('\033[?2026h'),1)
+            self.assertEqual(written.count('\033[?2026l'),1)
+            self.assertLess(written.index('\033[?2026h'),written.index('\033[2J'))
+            self.assertLess(written.index('\033[2J'),written.index('\033[?2026l'))
+            out.seek(0);out.truncate()
+            tui.render()
+            self.assertEqual(out.getvalue(),'')
+
+    def test_failed_or_interrupted_frame_still_attempts_end_mode(self):
+        for failure in (OSError('frame write failed'),KeyboardInterrupt()):
+            tui=self.tui();attempts=[]
+            class Output:
+                def write(self,text):
+                    attempts.append(text)
+                    if text.startswith('\033[?2026h'):raise failure
+                def flush(self):pass
+            with patch('claudefm.tui.shutil.get_terminal_size',return_value=(80,24)), \
+                 patch('claudefm.tui.sys.stdout',Output()):
+                with self.assertRaises(type(failure)):tui.render()
+            self.assertEqual(attempts[-1],'\033[?2026l')
+            self.assertEqual(tui._previous_lines,[])
+
+    def test_cleanup_resets_mode_first_and_restores_termios_even_if_output_fails(self):
+        tui=self.tui();tui.old_termios=['saved tty state']
+        with patch('claudefm.tui.sys.stdout',new_callable=io.StringIO) as out, \
+             patch('claudefm.tui.termios.tcsetattr') as restore:
+            tui.restore_terminal()
+            text=out.getvalue()
+            self.assertTrue(text.startswith('\033[?2026l'))
+            self.assertLess(text.index('\033[?2026l'),text.index('\033[?25h'))
+            restore.assert_called_once_with(sys.stdin,termios.TCSADRAIN,tui.old_termios)
+        attempts=[]
+        class BrokenOutput:
+            def write(self,text):
+                attempts.append(text)
+                raise OSError('pipe closed')
+            def flush(self):pass
+        with patch('claudefm.tui.sys.stdout',BrokenOutput()), \
+             patch('claudefm.tui.termios.tcsetattr') as restore:
+            with self.assertRaises(OSError):tui.restore_terminal()
+            restore.assert_called_once_with(sys.stdin,termios.TCSADRAIN,tui.old_termios)
+        self.assertTrue(attempts[0].startswith('\033[?2026l'))
+
+    def test_run_stops_audio_when_terminal_output_cleanup_fails(self):
+        tui=self.tui()
+        class BrokenOutput:
+            def write(self,text):raise OSError('pipe closed')
+            def flush(self):pass
+        with patch.object(tui,'setup_terminal'), \
+             patch.object(tui,'handle_input',side_effect=lambda:setattr(tui,'running',False)), \
+             patch.object(tui.audio,'stop') as stop, \
+             patch('claudefm.tui.signal.signal'), \
+             patch('claudefm.tui.sys.stdout',BrokenOutput()):
+            with self.assertRaises(OSError):tui.run()
+            stop.assert_called_once_with()
 
 
 if __name__ == '__main__':
