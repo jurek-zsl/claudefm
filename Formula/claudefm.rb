@@ -1,8 +1,8 @@
 class Claudefm < Formula
   desc "Lo-fi radio with animated Clawd scenes in your terminal"
   homepage "https://github.com/jurek-zsl/claudefm"
-  url "https://github.com/jurek-zsl/claudefm/archive/refs/tags/v1.1.1.tar.gz"
-  sha256 "724be0ab0433b7715366f1c809781cad0ce132459d1843ec00c8d278612f4086"
+  url "https://github.com/jurek-zsl/claudefm/archive/refs/tags/v1.2.0.tar.gz"
+  sha256 "08fbdfa80c14d9829eca9533a0f7242bcea930fcb48766ff9c0ce90a371097ab"
   license "MIT"
 
   depends_on :macos
