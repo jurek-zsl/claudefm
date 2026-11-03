@@ -29,6 +29,13 @@ claudefm
 
 The community tap lives in this repository. Homebrew installs Python, `mpv`, and `yt-dlp` along with the app.
 
+To get the latest version:
+
+```sh
+brew update
+brew upgrade jurek-zsl/claudefm/claudefm
+```
+
 <details>
 <summary>Install with pipx instead (macOS or Linux)</summary>
 
