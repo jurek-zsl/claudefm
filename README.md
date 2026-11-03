@@ -18,13 +18,20 @@ A community-built player for [Claude FM](https://www.youtube.com/watch?v=tRsQsTM
 
 ## Install
 
-On macOS with Homebrew:
+### macOS · Homebrew
 
 ```sh
-brew install mpv yt-dlp pipx
+brew tap jurek-zsl/claudefm https://github.com/jurek-zsl/claudefm
+brew install jurek-zsl/claudefm/claudefm
+claudefm
 ```
 
-On Linux, install `mpv`, `yt-dlp`, and `pipx` with your package manager. Then install the CLI from this repository:
+The community tap lives in this repository. Homebrew installs Python, `mpv`, and `yt-dlp` along with the app.
+
+<details>
+<summary>Install with pipx instead (macOS or Linux)</summary>
+
+Install `mpv`, `yt-dlp`, and `pipx` with your package manager. On macOS, use `brew install mpv yt-dlp pipx`. Then install the CLI from this repository:
 
 ```sh
 pipx install 'git+https://github.com/jurek-zsl/claudefm.git'
@@ -32,7 +39,9 @@ pipx ensurepath
 claudefm
 ```
 
-If `pipx` asks you to refresh your PATH, open a new terminal before running `claudefm`. Installation pulls the source from this GitHub repository.
+If `pipx` asks you to refresh your PATH, open a new terminal before running `claudefm`. This method pulls the source from GitHub.
+
+</details>
 
 <details>
 <summary>Run from source in a virtual environment</summary>

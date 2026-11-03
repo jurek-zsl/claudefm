@@ -12,3 +12,4 @@ Initial open-source version.
 - Responsive half-block rendering, changed-row updates, help, and terminal restoration on exit.
 - Honest playback states and useful audio errors, including discovery of Homebrew's unlinked `yt-dlp` installation.
 - Standard-library runtime, regression tests, and a developer preview exporter.
+- macOS Homebrew installation through the project's community tap, with declared audio dependencies and a checked source archive.

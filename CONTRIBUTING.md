@@ -61,6 +61,37 @@ When changing animation or rendering:
 
 `claudefm/sprites.py` defines Clawd's poses, `scene.py` composes the worlds, `tui.py` draws and handles controls, and `audio.py` owns playback. Theme detection runs once at startup in `themes.py`.
 
+## Homebrew formula
+
+`Formula/claudefm.rb` uses an immutable version-tag archive and SHA-256 checksum. The formula installs the standard-library app directly into `libexec`, uses Homebrew's Python, and declares `mpv` and `yt-dlp` as dependencies. It does not need pip or a build backend.
+
+To test a formula change on macOS:
+
+```sh
+brew tap jurek-zsl/claudefm https://github.com/jurek-zsl/claudefm
+cp Formula/claudefm.rb "$(brew --repository jurek-zsl/claudefm)/Formula/claudefm.rb"
+brew install --build-from-source jurek-zsl/claudefm/claudefm
+brew test jurek-zsl/claudefm/claudefm
+```
+
+If it is already installed, use `brew reinstall --build-from-source` in place of `brew install`. On Homebrew versions with formula trust prompts, review and trust this specific formula with `brew trust --formula jurek-zsl/claudefm/claudefm` before testing. The Homebrew workflow checks the formula from the current checkout, including pull-request changes.
+
+For a new version:
+
+1. Update `claudefm.__version__` and the changelog, run the checks, and commit the release source.
+2. Create and push a version tag such as `v1.0.1`. Never move an existing release tag.
+3. Download that exact tag archive and compute its checksum:
+
+   ```sh
+   curl --fail --location --output /tmp/claudefm-v1.0.1.tar.gz \
+     https://github.com/jurek-zsl/claudefm/archive/refs/tags/v1.0.1.tar.gz
+   shasum -a 256 /tmp/claudefm-v1.0.1.tar.gz
+   ```
+
+4. Update the formula's archive URL and `sha256`, test the installation, and commit the formula change. Use the new version in the commands above for each release.
+
+The formula has no bottles; Homebrew installs from the verified source archive. The formula currently supports macOS; the pipx and source installations also support Linux.
+
 ## Pull requests and issues
 
 Describe the concrete problem, resulting behavior, and checks run. Include an actual terminal render for visual changes. Keep generated experiments, local environments, build outputs, and machine-specific settings out of commits.

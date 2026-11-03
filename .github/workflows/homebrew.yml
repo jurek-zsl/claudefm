@@ -1,0 +1,43 @@
+name: Homebrew
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/homebrew.yml'
+  pull_request:
+    paths:
+      - 'Formula/**'
+      - '.github/workflows/homebrew.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    name: Install and test formula (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 25
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ASK: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Load the formula from this checkout
+        run: |
+          brew tap jurek-zsl/claudefm https://github.com/jurek-zsl/claudefm
+          tap_path="$(brew --repository jurek-zsl/claudefm)"
+          mkdir -p "$tap_path/Formula"
+          cp Formula/claudefm.rb "$tap_path/Formula/claudefm.rb"
+          if brew help trust >/dev/null 2>&1; then
+            brew trust --formula jurek-zsl/claudefm/claudefm
+          fi
+      - name: Install the verified source archive
+        run: brew install --build-from-source jurek-zsl/claudefm/claudefm
+      - name: Run offline functional checks
+        run: brew test jurek-zsl/claudefm/claudefm
